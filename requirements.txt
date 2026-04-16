@@ -1,0 +1,22 @@
+# Telegram Bot Framework
+aiogram==3.3.0
+
+# Redis for distributed storage
+redis==5.0.1
+aioredis==2.0.1
+
+# Environment variables management
+python-dotenv==1.0.0
+
+# Type checking and validation
+pydantic==2.5.0
+
+# Additional dependencies
+aiohttp==3.9.1
+
+# Development dependencies
+pytest==7.4.3
+pytest-asyncio==0.21.1
+black==23.12.0
+flake8==6.1.0
+mypy==1.7.1
