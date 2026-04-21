@@ -1,22 +1,44 @@
-# Telegram Bot Framework
+# Core dependencies
 aiogram==3.3.0
+python-aiogram==0.7.0
 
-# Redis for distributed storage
+# Database
+sqlalchemy==2.0.25
+asyncpg==0.29.0
+alembic==1.13.1
+
+# Cache & Queue
 redis==5.0.1
 aioredis==2.0.1
 
-# Environment variables management
+# Environment variables
 python-dotenv==1.0.0
 
-# Type checking and validation
-pydantic==2.5.0
+# Google Sheets API
+google-auth-oauthlib==1.2.0
+google-auth-httplib2==0.2.0
+google-api-python-client==2.107.0
 
-# Additional dependencies
-aiohttp==3.9.1
+# OpenAI Whisper
+openai==1.12.0
+pydub==0.25.1
 
-# Development dependencies
+# Logging & Monitoring
+python-json-logger==2.0.7
+prometheus-client==0.19.0
+
+# Utilities
+pydantic==2.5.3
+pydantic-settings==2.1.0
+click==8.1.7
+typing-extensions==4.9.0
+
+# Development & Testing
 pytest==7.4.3
-pytest-asyncio==0.21.1
-black==23.12.0
+pytest-asyncio==0.23.2
+pytest-cov==4.1.0
+pytest-mock==3.12.0
+black==23.12.1
 flake8==6.1.0
+pylint==3.0.3
 mypy==1.7.1
