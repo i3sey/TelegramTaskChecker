@@ -144,6 +144,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# Logs
+logs/
+
 # Spyder project settings
 .spyderproject
 .spyproject
@@ -200,6 +203,7 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+.claude/
 
 # Marimo
 marimo/_static/
