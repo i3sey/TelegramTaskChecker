@@ -1,0 +1,68 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-mock pytest-cov aiosqlite
+
+      - name: Run unit tests
+        env:
+          POSTGRES_HOST: localhost
+          REDIS_HOST: localhost
+        run: |
+          pytest tests/unit/ -v --cov=src --cov-report=xml --cov-report=term
+
+      - name: Run integration tests
+        env:
+          POSTGRES_HOST: localhost
+          REDIS_HOST: localhost
+          DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test_db
+        run: |
+          pytest tests/integration/ -v --tb=short
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        if: success()
