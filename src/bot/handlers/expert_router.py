@@ -1,270 +1,431 @@
 """Expert handler router for review and feedback commands."""
-
+import os
 from typing import Any
-from aiogram import Router, types, F
+from aiogram import Bot, Router, types, F
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+from src.config import config
+from src.db.engine import session_scope
+from src.db.models import UserRole, SubmissionStatus, User, Campaign
+from src.services.user_service import get_user
+from src.services.submission_service import get_submission, update_submission_status
+from src.services.review_service import create_review, count_pending_submissions, get_submission_pending
+from src.services.campaign_service import get_campaign
+from src.services.queue_service import queue_service, QueueService
+from src.services.sheets_service import SheetsService
+from src.services.notification_service import NotificationService
+from src.utils.logging import logger
 
 
+def _get_sheets_service() -> SheetsService | None:
+    """Get SheetsService instance if configured."""
+    spreadsheet_id = os.getenv("GOOGLE_SHEETS_ID") or config.sheets.spreadsheet_id
+    credentials_path = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE") or config.sheets.credentials_path
+    if spreadsheet_id and credentials_path:
+        return SheetsService(spreadsheet_id, credentials_path)
+    return None
+
+
+def _get_notification_service(bot: Bot) -> NotificationService:
+    """Get NotificationService instance."""
+    return NotificationService(bot)
+
+
+# Create router
 router = Router()
 router.name = "expert_router"
 
 
 class ExpertReviewState(StatesGroup):
     """FSM states for expert review workflow."""
-    
-    viewing_queue = State()
+    idle = State()
     reviewing_submission = State()
-    waiting_for_feedback = State()
-    waiting_for_rating = State()
-    waiting_for_voice = State()
+    waiting_for_score = State()
+    waiting_for_comment = State()
 
 
-@router.message(Command("start"), F.text == "/start")
-async def cmd_start(message: types.Message, user_role: str = "expert") -> None:
-    """
-    Handle /start command for expert users.
-    
-    Displays welcome message and available expert commands.
-    
-    Args:
-        message: Telegram message object
-        user_role: User's role in the system
-    """
-    welcome_text = (
-        "👋 Welcome Expert!\n\n"
-        "You have access to the review queue system.\n\n"
-        "Available commands:\n"
-        "📋 /queue - View submissions to review\n"
-        "✅ /take - Claim a submission for review\n"
-        "💬 /submit_feedback - Provide feedback on a submission\n"
-        "⭐ /rating - Submit a rating\n"
-        "📊 /stats - View your review statistics\n\n"
-        "Ready to help? Let's get started! 🚀"
+def get_score_keyboard(min_score: int, max_score: int) -> InlineKeyboardMarkup:
+    """Generate inline keyboard for score selection."""
+    buttons = []
+    step = max(1, (max_score - min_score) // 5)
+    current = min_score
+
+    while current <= max_score:
+        row = []
+        for _ in range(min(3, max_score - current + 1)):
+            row.append(InlineKeyboardButton(
+                text=str(current),
+                callback_data=f"score_{current}"
+            ))
+            current += 1
+            if current > max_score:
+                break
+        buttons.append(row)
+
+    buttons.append([InlineKeyboardButton(
+        text="Отмена",
+        callback_data="cancel_review"
+    )])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_confirm_keyboard() -> InlineKeyboardMarkup:
+    """Generate confirmation keyboard for review submission."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="Подтвердить", callback_data="confirm_submit"),
+            InlineKeyboardButton(text="Отмена", callback_data="cancel_review"),
+        ]
+    ])
+
+
+async def check_expert_role(message: types.Message) -> bool:
+    """Check if the user has EXPERT role."""
+    tg_id = message.from_user.id
+    async with session_scope() as session:
+        user = await get_user(tg_id=tg_id, session=session)
+        if not user:
+            await message.answer("❌ Вы не зарегистрированы. Используйте /start.")
+            return False
+        if user.role != UserRole.EXPERT:
+            await message.answer("⛔ Эта команда доступна только для экспертов.")
+            return False
+        if user.is_banned:
+            await message.answer("⛔ Ваш аккаунт заблокирован.")
+            return False
+    return True
+
+
+async def send_submission_to_expert(
+    message: types.Message,
+    submission,
+    campaign,
+    author: User
+) -> None:
+    """Send submission file to expert with scoring interface."""
+    try:
+        await message.answer_document(
+            document=submission.file_id,
+            caption=(
+                f"📄 <b>Новая работа для проверки</b>\n\n"
+                f"📋 Кампания: <b>{campaign.title}</b>\n"
+                f"👤 Студент: <b>{author.full_name}</b>\n"
+                f"📚 Группа: <b>{author.study_group or 'Не указана'}</b>\n"
+                f"🆔 ID: <code>{submission.id}</code>\n"
+                f"📅 Загружено: <code>{submission.created_at.strftime('%d.%m.%Y %H:%M')}</code>\n\n"
+                f"⬇️ Оцените работу от <b>{campaign.min_score}</b> до <b>{campaign.max_score}</b>:"
+            ),
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        logger.error(f"Failed to send file {submission.file_id}: {e}")
+        await message.answer(
+            f"📄 <b>Новая работа для проверки</b>\n\n"
+            f"📋 Кампания: <b>{campaign.title}</b>\n"
+            f"👤 Студент: <b>{author.full_name}</b>\n"
+            f"📚 Группа: <b>{author.study_group or 'Не указана'}</b>\n"
+            f"🆔 ID: <code>{submission.id}</code>\n"
+            f"⚠️ Файл недоступен для отправки",
+            parse_mode="HTML",
+        )
+
+    await message.answer(
+        "⬇️ Выберите оценку:",
+        reply_markup=get_score_keyboard(campaign.min_score, campaign.max_score)
     )
-    
-    await message.answer(welcome_text)
 
 
+# Command handlers
 @router.message(Command("queue"))
-async def cmd_queue(message: types.Message, state: FSMContext) -> None:
-    """
-    Handle /queue command to view available submissions for review.
-    
-    Displays list of pending submissions waiting for expert review.
-    
-    Args:
-        message: Telegram message object
-        state: FSM context for managing conversation state
-    """
-    queue_text = (
-        "📋 Available Submissions in Queue\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "1️⃣ SUB-987654-001 | Python Assignment\n"
-        "   👤 Student: Alice M.\n"
-        "   ⏱️ Waiting: 1 hour\n"
-        "   📄 Type: Code file (Python)\n\n"
-        "2️⃣ SUB-876543-002 | Research Paper\n"
-        "   👤 Student: Bob T.\n"
-        "   ⏱️ Waiting: 2 hours\n"
-        "   📄 Type: PDF Document\n\n"
-        "3️⃣ SUB-765432-003 | Project Report\n"
-        "   👤 Student: Carol S.\n"
-        "   ⏱️ Waiting: 30 minutes\n"
-        "   📄 Type: Word Document\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "Use /take <ID> to claim a submission for review."
+async def cmd_queue(message: types.Message) -> None:
+    """Handle /queue command - show count of submissions waiting in queue."""
+    if not await check_expert_role(message):
+        return
+
+    logger.info(f"Expert {message.from_user.id} requested queue status")
+
+    async with session_scope() as session:
+        count = await count_pending_submissions(session)
+
+    # Also show Redis-locked submissions
+    locked = await queue_service.get_all_locked_submissions()
+
+    await message.answer(
+        f"📋 <b>Очередь проверки</b>\n\n"
+        f"📦 Работ в очереди: <b>{count}</b>\n"
+        f"🔒 На проверке сейчас: <b>{len(locked)}</b>\n\n"
+        "Используйте /take для получения следующей работы.",
+        parse_mode="HTML",
     )
-    
-    await message.answer(queue_text)
-    await state.set_state(ExpertReviewState.viewing_queue)
 
 
 @router.message(Command("take"))
 async def cmd_take(message: types.Message, state: FSMContext) -> None:
-    """
-    Handle /take command to claim a submission for review.
-    
-    Args:
-        message: Telegram message object
-        state: FSM context for managing conversation state
-    """
-    args = message.text.split()
-    
-    if len(args) < 2:
+    """Handle /take command - get next submission from queue with Redis lock."""
+    if not await check_expert_role(message):
+        return
+
+    tg_id = message.from_user.id
+
+    logger.info(f"Expert {tg_id} trying to take a submission")
+
+    async with session_scope() as session:
+        submissions = await get_submission_pending(session, limit=10)
+
+        for submission in submissions:
+            # Get campaign for TTL
+            campaign = await get_campaign(submission.campaign_id, session)
+            if not campaign:
+                continue
+
+            # Try to lock with Redis
+            locked = await queue_service.lock_submission(
+                submission_id=submission.id,
+                expert_id=tg_id,
+                ttl_minutes=campaign.ttl_minutes,
+            )
+
+            if locked:
+                # Update DB status
+                await update_submission_status(
+                    submission.id,
+                    SubmissionStatus.IN_REVIEW,
+                    session
+                )
+
+                # Get author
+                author = await get_user(tg_id=submission.author_id, session=session)
+
+                # Update FSM state
+                await state.set_state(ExpertReviewState.reviewing_submission)
+                await state.update_data(
+                    submission_id=submission.id,
+                    campaign_id=submission.campaign_id,
+                    ttl_minutes=campaign.ttl_minutes,
+                )
+
+                logger.info(f"Expert {tg_id} took submission {submission.id} (TTL: {campaign.ttl_minutes}m)")
+
+                # Send to expert
+                await send_submission_to_expert(message, submission, campaign, author)
+                return
+
         await message.answer(
-            "Please specify submission ID:\n"
-            "/take <SUBMISSION_ID>\n\n"
-            "Example: /take SUB-987654-001"
+            "📭 <b>Очередь пуста</b>\n\n"
+            "Нет доступных работ для проверки.",
+            parse_mode="HTML",
         )
+
+
+@router.message(Command("return"))
+async def cmd_return(message: types.Message, state: FSMContext) -> None:
+    """Handle /return command - return submission back to queue."""
+    if not await check_expert_role(message):
         return
-    
-    submission_id = args[1]
-    
-    claim_text = (
-        f"✅ You've claimed submission: {submission_id}\n\n"
-        "📋 Submission Details:\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "Student: Alice M.\n"
-        "Type: Python Code\n"
-        "Description: Assignment implementation\n"
-        "Submitted: 2 hours ago\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "📝 Next steps:\n"
-        "1. Review the content carefully\n"
-        "2. Use /submit_feedback to provide feedback\n"
-        "3. Use /rating to submit your score\n"
-        "4. Feedback will be sent to the student"
-    )
-    
-    await message.answer(claim_text)
-    await state.update_data(current_submission=submission_id)
-    await state.set_state(ExpertReviewState.reviewing_submission)
 
+    tg_id = message.from_user.id
+    data = await state.get_data()
+    submission_id = data.get("submission_id")
 
-@router.message(Command("submit_feedback"))
-async def cmd_submit_feedback(message: types.Message, state: FSMContext) -> None:
-    """
-    Handle /submit_feedback command to start feedback submission.
-    
-    Supports text and voice feedback input.
-    
-    Args:
-        message: Telegram message object
-        state: FSM context for managing conversation state
-    """
-    feedback_text = (
-        "📝 Submit Your Feedback\n\n"
-        "You can provide feedback in two ways:\n\n"
-        "1️⃣ **Text Feedback**\n"
-        "   Just type your comments and I'll save them.\n\n"
-        "2️⃣ **Voice Feedback**\n"
-        "   Send a voice message and I'll transcribe it.\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "⚠️ Feedback will be:\n"
-        "• Reviewed for quality\n"
-        "• Sent to the student\n"
-        "• Stored in the system\n\n"
-        "Send your feedback now:"
-    )
-    
-    await message.answer(feedback_text)
-    await state.set_state(ExpertReviewState.waiting_for_feedback)
+    if not submission_id:
+        await message.answer("⚠️ У вас нет работы на проверке.")
+        return
 
+    logger.info(f"Expert {tg_id} returning submission {submission_id}")
 
-@router.message(ExpertReviewState.waiting_for_feedback)
-async def process_feedback(
-    message: types.Message, state: FSMContext
-) -> None:
-    """
-    Process text or voice feedback from expert.
-    
-    Handles transcription of voice messages and storage of feedback.
-    
-    Args:
-        message: Telegram message object
-        state: FSM context for managing conversation state
-    """
-    feedback_data = {
-        "type": "text",
-        "content": message.text or "[Voice message]",
-    }
-    
-    if message.voice:
-        feedback_data["type"] = "voice"
-        feedback_data["file_id"] = message.voice.file_id
-        feedback_data["duration"] = message.voice.duration
-        
-        transcription_text = (
-            "🔄 Processing voice message...\n"
-            "⏳ Transcribing with Whisper AI...\n\n"
-            "[Simulated transcription would appear here]"
+    # Unlock from Redis
+    await queue_service.unlock_submission(submission_id)
+
+    # Update DB status
+    async with session_scope() as session:
+        await update_submission_status(
+            submission_id,
+            SubmissionStatus.UPLOADED,
+            session
         )
-        await message.answer(transcription_text)
-    
-    await state.update_data(feedback=feedback_data)
-    
+
+    await state.clear()
+
     await message.answer(
-        "✅ Feedback recorded!\n\n"
-        "Now, please rate this submission using /rating"
+        f"✅ Работа (ID: <code>{submission_id}</code>) возвращена в очередь.",
+        parse_mode="HTML",
     )
-    await state.set_state(ExpertReviewState.waiting_for_rating)
 
 
-@router.message(Command("rating"))
-async def cmd_rating(message: types.Message, state: FSMContext) -> None:
-    """
-    Handle /rating command to submit a rating/score.
-    
-    Args:
-        message: Telegram message object
-        state: FSM context for managing conversation state
-    """
-    args = message.text.split()
-    
-    if len(args) < 2:
-        rating_text = (
-            "⭐ Submit Your Rating\n\n"
-            "Please rate the submission from 1 to 5:\n"
-            "1 - Poor\n"
-            "2 - Fair\n"
-            "3 - Good\n"
-            "4 - Very Good\n"
-            "5 - Excellent\n\n"
-            "Usage: /rating <score>\n"
-            "Example: /rating 4"
-        )
-        await message.answer(rating_text)
+# Callback query handlers
+@router.callback_query(F.data.startswith("score_"))
+async def handle_score_callback(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Handle score button callback."""
+    if not callback.message or not isinstance(callback.message, types.Message):
         return
-    
+
+    tg_id = callback.from_user.id
+    message = callback.message
+    data = await state.get_data()
+    submission_id = data.get("submission_id")
+
+    if not submission_id:
+        await callback.answer("У вас нет работы на проверке", show_alert=True)
+        await message.answer("⚠️ У вас нет работы на проверке. Используйте /take.")
+        return
+
     try:
-        rating = int(args[1])
-        if not (1 <= rating <= 5):
-            await message.answer("⚠️ Rating must be between 1 and 5.")
-            return
-        
-        data = await state.get_data()
-        
-        result_text = (
-            "🎉 Review Submitted!\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"Rating: {'⭐' * rating} ({rating}/5)\n"
-            f"Feedback Type: {data.get('feedback', {}).get('type', 'text')}\n"
-            "Status: ✅ Completed\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "The student will receive your feedback shortly.\n"
-            "Thank you for reviewing! 👏"
-        )
-        
-        await message.answer(result_text)
-        await state.clear()
-    
-    except ValueError:
-        await message.answer("⚠️ Please provide a numeric rating (1-5).")
+        score = int(callback.data.split("_")[1])
+    except (ValueError, IndexError):
+        await callback.answer("Ошибка выбора оценки", show_alert=True)
+        return
 
+    await state.update_data(score=score)
+    await callback.answer(f"Оценка: {score}")
 
-@router.message(Command("stats"))
-async def cmd_stats(message: types.Message, user_id: int) -> None:
-    """
-    Handle /stats command to view expert's review statistics.
-    
-    Args:
-        message: Telegram message object
-        user_id: Telegram user ID
-    """
-    stats_text = (
-        "📊 Your Review Statistics\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "Total Reviews: 47\n"
-        "Average Rating: 3.8/5\n"
-        "This Week: 12\n"
-        "This Month: 42\n"
-        "Average Review Time: 25 min\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "🏆 Tier: Gold Expert\n"
-        "⭐ Rating: 4.6/5 from students\n"
-        "👥 Feedback: Excellent reviewer"
+    await state.set_state(ExpertReviewState.waiting_for_comment)
+    await message.answer(
+        f"📝 <b>Вы выбрали оценку: {score}</b>\n\n"
+        "Введите комментарий к работе (или отправьте 'пропустить' для пустого комментария):",
+        parse_mode="HTML",
+        reply_markup=get_confirm_keyboard()
     )
-    
-    await message.answer(stats_text)
+
+
+@router.callback_query(F.data == "confirm_submit")
+async def handle_confirm_callback(callback: types.CallbackQuery, state: FSMContext, bot: Bot) -> None:
+    """Handle confirm button callback - save review."""
+    if not callback.message or not isinstance(callback.message, types.Message):
+        return
+
+    tg_id = callback.from_user.id
+    message = callback.message
+    data = await state.get_data()
+    submission_id = data.get("submission_id")
+    score = data.get("score")
+    comment_text = data.get("comment_text", "")
+
+    if not submission_id or score is None:
+        await callback.answer("Сначала выберите оценку", show_alert=True)
+        return
+
+    if comment_text == "пропустить":
+        comment_text = None
+
+    logger.info(f"Expert {tg_id} submitting review for submission {submission_id}: score={score}")
+
+    # Unlock from Redis
+    await queue_service.unlock_submission(submission_id)
+
+    # Save to DB and collect data for notifications
+    async with session_scope() as session:
+        await create_review(
+            submission_id=submission_id,
+            reviewer_id=tg_id,
+            score=score,
+            comment_text=comment_text,
+            session=session,
+        )
+        await update_submission_status(submission_id, SubmissionStatus.REVIEWED, session)
+
+        # Get submission with author info for notifications
+        submission = await get_submission(submission_id, session)
+        campaign = await get_campaign(submission.campaign_id, session)
+        author = await get_user(tg_id=submission.author_id, session=session)
+        reviewer = await get_user(tg_id=tg_id, session=session)
+
+        # Send to Google Sheets
+        sheets_service = _get_sheets_service()
+        if sheets_service:
+            review_data = {
+                "submission_id": submission.id,
+                "timestamp": submission.updated_at,
+                "campaign": campaign.title if campaign else "",
+                "author": author.full_name if author else "",
+                "group": author.study_group if author else "",
+                "reviewer": reviewer.full_name if reviewer else "",
+                "score": score,
+                "comment": comment_text,
+            }
+            try:
+                await sheets_service.append_review(review_data)
+            except Exception as e:
+                logger.error(f"Failed to send review to Google Sheets: {e}")
+
+        # Notify student about review
+        if author and not author.is_banned:
+            notification_service = _get_notification_service(bot)
+            try:
+                await notification_service.notify_student_reviewed(
+                    student_tg_id=author.tg_id,
+                    campaign_title=campaign.title if campaign else "",
+                    score=score,
+                    comment=comment_text,
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify student: {e}")
+
+    await state.clear()
+
+    await callback.answer("Рецензия сохранена!")
+    await message.answer(
+        f"✅ <b>Рецензия сохранена!</b>\n\n"
+        f"📋 ID работы: <code>{submission_id}</code>\n"
+        f"⭐ Оценка: <b>{score}</b>\n"
+        f"💬 Комментарий: <b>{comment_text or 'Без комментария'}</b>\n\n"
+        "Используйте /take для следующей работы.",
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data == "cancel_review")
+async def handle_cancel_callback(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Handle cancel button callback."""
+    if not callback.message or not isinstance(callback.message, types.Message):
+        return
+
+    await callback.answer("Отменено")
+    await callback.message.answer(
+        "❌ Действие отменено.\n\n"
+        "Используйте /return для возврата работы в очередь.",
+    )
+
+
+@router.message(StateFilter(ExpertReviewState.waiting_for_comment))
+async def process_comment(message: types.Message, state: FSMContext) -> None:
+    """Process expert's comment input."""
+    comment_text = message.text.strip()
+    await state.update_data(comment_text=comment_text)
+
+    await message.answer(
+        "💬 Комментарий сохранен.\n\n"
+        "Нажмите 'Подтвердить' для сохранения рецензии.",
+        reply_markup=get_confirm_keyboard()
+    )
+
+
+@router.message(Command("expert_stats"))
+async def cmd_expert_stats(message: types.Message) -> None:
+    """Handle /expert_stats command - show expert's review statistics."""
+    if not await check_expert_role(message):
+        return
+
+    tg_id = message.from_user.id
+    logger.info(f"Expert {tg_id} requested stats")
+
+    async with session_scope() as session:
+        from src.services.review_service import get_expert_reviews
+        reviews = await get_expert_reviews(tg_id, session)
+
+        total_reviews = len(reviews)
+        if total_reviews > 0:
+            scores = [r.score for r in reviews if r.score]
+            avg_score = sum(scores) / len(scores) if scores else 0
+        else:
+            avg_score = 0
+
+    await message.answer(
+        f"📊 <b>Ваша статистика</b>\n\n"
+        f"📝 Всего рецензий: <b>{total_reviews}</b>\n"
+        f"⭐ Средняя оценка: <b>{avg_score:.1f}</b>",
+        parse_mode="HTML",
+    )

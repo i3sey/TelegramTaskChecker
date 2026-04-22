@@ -1,3 +1,23 @@
+# Telegram Bot Framework
 aiogram==3.13.1
+
+# Database (async PostgreSQL with SQLAlchemy)
+sqlalchemy[asyncio]>=2.0.0
+asyncpg>=0.29.0
+
+# Redis for distributed storage and queue
+redis>=5.0.0
+
+# Environment variables management
 python-dotenv==1.0.0
+
+# SOCKS proxy support
 aiohttp-socks>=0.11.0
+
+# Google Sheets API (for MVP 1)
+google-api-python-client>=2.100.0
+google-auth>=2.25.0
+
+# Development dependencies
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
