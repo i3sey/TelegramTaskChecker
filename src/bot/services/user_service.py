@@ -2,8 +2,8 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.models import User, UserRole
-from src.utils.logging import logger
+from src.bot.models import User, UserRole
+from src.bot.utils.logging import logger
 
 
 class UserService:

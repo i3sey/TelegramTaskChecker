@@ -2,37 +2,23 @@
 from aiogram import Router, types
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from src.db.engine import session_scope
 from src.db.models import UserRole, CampaignType
-from src.services.user_service import get_user
-from src.services.campaign_service import (
+from src.bot.services.user_service import get_user
+from src.bot.services.campaign_service import (
     get_campaign,
     get_active_campaigns,
     create_campaign,
     get_campaigns_by_organizer,
 )
-from src.utils.logging import logger
-
-
-# FSM States for campaign creation
-class CampaignCreationStates(StatesGroup):
-    """States for campaign creation flow."""
-    waiting_for_title = State()
-    waiting_for_type = State()
-    waiting_for_min_score = State()
-    waiting_for_max_score = State()
-    waiting_for_ttl = State()
-    waiting_for_anonymous = State()
-
-
-# FSM States for submission
-class SubmissionStates(StatesGroup):
-    """States for submission flow."""
-    waiting_for_campaign = State()
-    waiting_for_file = State()
+from src.bot.services.submission_service import (
+    create_submission,
+    get_user_submissions,
+)
+from src.bot.utils.logging import logger
+from src.bot.states import CampaignCreationStates, SubmissionStates
 
 
 # Create router
@@ -90,7 +76,7 @@ async def cmd_create_campaign(message: types.Message, state: FSMContext):
             )
             return
 
-        if user.role != UserRole.ORGANIZER:
+        if user.role not in (UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER):
             await message.answer(
                 "❌ Только организаторы могут создавать кампании.\n"
                 "Обратитесь к администратору для получения прав."
@@ -197,7 +183,8 @@ async def process_min_score(message: types.Message, state: FSMContext):
 
     await message.answer(
         "📊 <b>Введите максимальный балл:</b>\n"
-        "(по умолчанию: 100)"
+        "(по умолчанию: 100)",
+        parse_mode="HTML",
     )
     await state.set_state(CampaignCreationStates.waiting_for_max_score)
 
@@ -229,7 +216,8 @@ async def process_max_score(message: types.Message, state: FSMContext):
 
     await message.answer(
         "⏱ <b>Введите время на проверку (в минутах):</b>\n"
-        "(по умолчанию: 1440 = 24 часа)"
+        "(по умолчанию: 1440 = 24 часа)",
+        parse_mode="HTML",
     )
     await state.set_state(CampaignCreationStates.waiting_for_ttl)
 
@@ -360,7 +348,7 @@ async def cmd_my_campaigns(message: types.Message):
             )
             return
 
-        if user.role != UserRole.ORGANIZER:
+        if user.role not in (UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER):
             await message.answer(
                 "❌ Только организаторы могут просматривать свои кампании."
             )
@@ -376,13 +364,28 @@ async def cmd_my_campaigns(message: types.Message):
             )
             return
 
+        submission_counts = {}
+        campaign_ids = [campaign.id for campaign in campaigns]
+        if campaign_ids:
+            from sqlalchemy import func, select
+            from src.db.models import Submission
+
+            result = await session.execute(
+                select(Submission.campaign_id, func.count(Submission.id))
+                .where(Submission.campaign_id.in_(campaign_ids))
+                .group_by(Submission.campaign_id)
+            )
+            submission_counts = {
+                campaign_id: count for campaign_id, count in result.all()
+            }
+
         text = "📋 <b>Ваши кампании:</b>\n\n"
         for i, campaign in enumerate(campaigns, 1):
             status = "🟢 Активна" if campaign.is_active else "🔴 Неактивна"
             text += f"{i}. <b>{campaign.title}</b> {status}\n"
             text += f"   📊 Тип: {get_campaign_type_display(campaign.type)}\n"
             text += f"   📈 Баллы: {campaign.min_score} - {campaign.max_score}\n"
-            text += f"   📝 Сдано: {len(campaign.submissions)} работ\n\n"
+            text += f"   📝 Сдано: {submission_counts.get(campaign.id, 0)} работ\n\n"
 
         await message.answer(text, parse_mode="HTML")
 
@@ -402,6 +405,19 @@ async def cmd_submit(message: types.Message, state: FSMContext):
         if not user:
             await message.answer(
                 "❌ Вы не зарегистрированы. Используйте /start для регистрации."
+            )
+            return
+
+        if user.role != UserRole.STUDENT:
+            await message.answer(
+                "❌ Сдача работ доступна только студентам."
+            )
+            return
+
+        if user.role == UserRole.STUDENT and (not user.registered_by_code or user.invite_role != "student"):
+            await message.answer(
+                "❌ Для сдачи работ нужен код доступа. "
+                "Откройте ссылку приглашения"
             )
             return
 

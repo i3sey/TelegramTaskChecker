@@ -9,7 +9,7 @@ import redis.asyncio as redis
 from aiogram import Bot
 
 from src.config import config
-from src.utils.logging import logger
+from src.bot.utils.logging import logger
 
 
 class NotificationService:

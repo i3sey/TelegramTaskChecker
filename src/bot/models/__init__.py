@@ -1,22 +1,22 @@
-﻿"""Database models - redirects to bot.models."""
-from src.bot.models import (
+"""Database models."""
+from src.bot.models.models import (
     UserRole,
-    CampaignType,
-    SubmissionStatus,
     User,
     InviteCode,
     Campaign,
     Submission,
     Review,
+    CampaignType,
+    SubmissionStatus,
 )
 
 __all__ = [
     "UserRole",
-    "CampaignType",
-    "SubmissionStatus",
     "User",
     "InviteCode",
     "Campaign",
     "Submission",
     "Review",
+    "CampaignType",
+    "SubmissionStatus",
 ]

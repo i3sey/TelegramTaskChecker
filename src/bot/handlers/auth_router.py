@@ -1,24 +1,86 @@
 """Authentication router for user registration."""
+
 from aiogram import Router, types
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from src.db.engine import session_scope
-from src.services.user_service import get_user, create_user
+from src.bot.states import RegistrationStates, RoleChangeStates
 from src.db.models import UserRole
-from src.utils.logging import logger
-
-
-# FSM States for registration
-class RegistrationStates(StatesGroup):
-    """States for user registration flow."""
-    waiting_for_full_name = State()
-    waiting_for_study_group = State()
+from src.db.engine import session_scope
+from src.bot.services.user_service import (
+    get_user,
+    create_user,
+    update_user_role,
+    update_user_registered_by_code,
+    update_user_invite_role,
+)
+from src.bot.services.invite_service import (
+    get_invite_by_code,
+    is_invite_valid,
+    mark_invite_used,
+)
+from src.bot.utils.logging import logger
 
 
 # Create router
 router = Router()
+
+
+def _role_label(role: UserRole) -> str:
+    """Get human-readable label for role selection."""
+    labels = {
+        UserRole.STUDENT: "🎓 Студент",
+        UserRole.EXPERT: "🧑‍🏫 Эксперт",
+        UserRole.EXPERT_ORGANIZER: "🧑‍🏫+🧑‍💼 Эксперт+Организатор",
+        UserRole.ORGANIZER: "🧑‍💼 Организатор",
+    }
+    return labels.get(role, str(role))
+
+
+def _build_role_keyboard() -> InlineKeyboardMarkup:
+    """Build inline keyboard for role selection."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=_role_label(UserRole.STUDENT), callback_data="role_student")],
+            [InlineKeyboardButton(text=_role_label(UserRole.EXPERT), callback_data="role_expert")],
+            [InlineKeyboardButton(text=_role_label(UserRole.EXPERT_ORGANIZER), callback_data="role_expert_organizer")],
+            [InlineKeyboardButton(text=_role_label(UserRole.ORGANIZER), callback_data="role_organizer")],
+        ]
+    )
+
+
+def _extract_start_payload(text: str | None) -> str | None:
+    """Extract payload from /start command text."""
+    if not text:
+        return None
+    parts = text.strip().split(maxsplit=1)
+    if len(parts) == 2 and parts[0].startswith("/start"):
+        return parts[1].strip()
+    return None
+
+
+def _role_requires_invite(role: UserRole) -> bool:
+    """Return True if role requires invite access."""
+    return role in (UserRole.STUDENT, UserRole.EXPERT, UserRole.EXPERT_ORGANIZER)
+
+
+def _invite_matches_role(invite_role: str | None, role: UserRole) -> bool:
+    """Return True when invite role allows the requested role."""
+    if role == UserRole.STUDENT:
+        return invite_role == "student"
+    if role in (UserRole.EXPERT, UserRole.EXPERT_ORGANIZER):
+        return invite_role == "expert"
+    return True
+
+
+def _has_invite_access(user) -> bool:
+    """Check if user has valid invite access for their role."""
+    if not _role_requires_invite(user.role):
+        return True
+    if not user.registered_by_code:
+        return False
+    return _invite_matches_role(user.invite_role, user.role)
 
 
 # Command handlers
@@ -26,34 +88,97 @@ router = Router()
 async def cmd_start(message: types.Message, state: FSMContext):
     """Handle /start command."""
     tg_id = message.from_user.id
-    logger.info(f"User {tg_id} triggered /start command")
+    payload = _extract_start_payload(message.text)
+    invite_role = None
 
     # Check if user exists in database
     async with session_scope() as session:
+        invite = None
+        if payload:
+            invite = await get_invite_by_code(payload, session)
+        invite_ok = is_invite_valid(invite)
+        invite_role = invite.role if invite_ok else None
+
         existing_user = await get_user(tg_id=tg_id, session=session)
 
         if existing_user:
-            # User already registered - show main menu
-            logger.info(f"Existing user {tg_id} ({existing_user.full_name}) started bot")
+            if invite_ok and (
+                not existing_user.registered_by_code
+                or existing_user.invite_role != invite_role
+            ):
+                await update_user_registered_by_code(
+                    tg_id=tg_id,
+                    registered_by_code=True,
+                    session=session,
+                )
+                await update_user_invite_role(
+                    tg_id=tg_id,
+                    invite_role=invite_role,
+                    session=session,
+                )
+                await mark_invite_used(invite, session)
+                existing_user.registered_by_code = True
+                existing_user.invite_role = invite_role
+
+                if invite_role == "student":
+                    await message.answer(
+                        "✅ Инвайт активирован. Доступ к сдаче работ открыт.",
+                        parse_mode="HTML",
+                    )
+                elif invite_role == "expert":
+                    await message.answer(
+                        "✅ Инвайт активирован. Доступ к проверке работ открыт.",
+                        parse_mode="HTML",
+                    )
+
+            extra_notice = ""
+            # Don't show invite warning if we just validated an invite
+            if not invite_ok and not _has_invite_access(existing_user):
+                extra_notice = (
+                    "\n\n❗ Для доступа к роли нужен инвайт. "
+                    "Откройте ссылку приглашения или отправьте /start "
+                    "<code>&lt;код&gt;</code>."
+                )
+
             await message.answer(
                 f"👋 <b>Добро пожаловать, {existing_user.full_name}!</b>\n\n"
-                f"Вы успешно авторизованы как <b>{existing_user.role.value}</b>.\n"
+                f"Вы успешно авторизованы как <b>{_role_label(existing_user.role)}</b>.\n"
                 f"Группа: <b>{existing_user.study_group}</b>\n\n"
                 "Доступные команды:\n"
                 "📋 /campaigns - Мои кампании\n"
                 "👤 /profile - Профиль\n"
-                "❓ /help - Помощь",
+                "🎭 /role - Изменить роль\n"
+                "❓ /help - Помощь"
+                f"{extra_notice}",
                 parse_mode="HTML",
             )
+
+            if invite_ok and invite_role == "student" and existing_user.role == UserRole.STUDENT:
+                from src.bot.handlers.campaign_router import cmd_submit
+
+                await cmd_submit(message, state)
         else:
-            # New user - start registration
-            logger.info(f"New user {tg_id} starting registration")
-            await message.answer(
-                "🎓 <b>Добро пожаловать в Telegram Task Checker!</b>\n\n"
-                "Для регистрации введите ваше <b>полное имя</b> (ФИО):",
-                parse_mode="HTML",
+            await state.update_data(
+                invite_role=invite_role,
+                invite_ok=invite_ok,
+                invite_code=payload,
             )
-            await state.set_state(RegistrationStates.waiting_for_full_name)
+            if invite_ok:
+                role = UserRole.STUDENT if invite_role == "student" else UserRole.EXPERT
+                await state.update_data(role=role)
+                await message.answer(
+                    "🎓 <b>Добро пожаловать в Telegram Task Checker!</b>\n\n"
+                    "Для регистрации введите ваше <b>полное имя</b> (ФИО):",
+                    parse_mode="HTML",
+                )
+                await state.set_state(RegistrationStates.waiting_for_full_name)
+            else:
+                await message.answer(
+                    "👤 <b>Выберите роль для регистрации:</b>",
+                    reply_markup=_build_role_keyboard(),
+                    parse_mode="HTML",
+                )
+                await state.set_state(RegistrationStates.waiting_for_role)
 
 
 @router.message(StateFilter(RegistrationStates.waiting_for_full_name))
@@ -78,13 +203,66 @@ async def process_full_name(message: types.Message, state: FSMContext):
     await state.update_data(full_name=full_name)
     logger.debug(f"User {message.from_user.id} entered full_name: {full_name}")
 
-    # Ask for study group
-    await message.answer(
-        "📚 Отлично! Теперь введите вашу <b>учебную группу</b>:\n"
-        "(например: ИВТ-101, ИС-201)",
-        parse_mode="HTML",
-    )
-    await state.set_state(RegistrationStates.waiting_for_study_group)
+    data = await state.get_data()
+    role = data.get("role")
+    invite_ok = data.get("invite_ok", False)
+    invite_role = data.get("invite_role")
+    invite_code = data.get("invite_code")
+
+    if role is None:
+        await message.answer("❌ Сначала выберите роль через /start.")
+        await state.clear()
+        return
+
+    if role == UserRole.STUDENT:
+        await message.answer(
+            "📚 Отлично! Теперь введите вашу <b>учебную группу</b>:\n"
+            "(например: ИВТ-101, ИС-201)",
+            parse_mode="HTML",
+        )
+        await state.set_state(RegistrationStates.waiting_for_study_group)
+        return
+
+    try:
+        async with session_scope() as session:
+            invite = None
+            if invite_ok and invite_code:
+                invite = await get_invite_by_code(invite_code, session)
+
+            await create_user(
+                tg_id=message.from_user.id,
+                full_name=full_name,
+                study_group=None,
+                session=session,
+                role=role,
+                registered_by_code=invite_ok if _role_requires_invite(role) else False,
+                invite_role=invite_role if _role_requires_invite(role) else None,
+            )
+            if invite_ok and invite and _role_requires_invite(role):
+                await mark_invite_used(invite, session)
+
+        await state.clear()
+
+        await message.answer(
+            "✅ <b>Регистрация успешна!</b>\n\n"
+            f"👤 <b>{full_name}</b>\n"
+            f"🎭 Роль: <b>{_role_label(role)}</b>\n\n"
+            "Используйте /help для списка команд.",
+            parse_mode="HTML",
+        )
+
+        if invite_ok and invite_role == "expert":
+            await message.answer(
+                "✅ Инвайт активирован. Доступ к проверке работ открыт.",
+                parse_mode="HTML",
+            )
+    except Exception as e:
+        logger.error(f"Failed to create user {message.from_user.id}: {e}")
+        await message.answer(
+            "❌ Произошла ошибка при регистрации. Попробуйте позже.\n"
+            "Используйте /start для повторной попытки."
+        )
+        await state.clear()
 
 
 @router.message(StateFilter(RegistrationStates.waiting_for_study_group))
@@ -108,19 +286,39 @@ async def process_study_group(message: types.Message, state: FSMContext):
     # Get full name from FSM context
     data = await state.get_data()
     full_name = data.get("full_name")
+    role = data.get("role")
+    invite_ok = data.get("invite_ok", False)
+    invite_role = data.get("invite_role")
+    invite_code = data.get("invite_code")
 
     tg_id = message.from_user.id
+
+
+    if role != UserRole.STUDENT:
+        await message.answer("❌ Некорректная роль для ввода группы.")
+        await state.clear()
+        return
+
+    await state.update_data(study_group=study_group)
 
     # Create user in database
     try:
         async with session_scope() as session:
+            invite = None
+            if invite_ok and invite_code:
+                invite = await get_invite_by_code(invite_code, session)
+
             user = await create_user(
                 tg_id=tg_id,
                 full_name=full_name,
                 study_group=study_group,
                 session=session,
                 role=UserRole.STUDENT,
+                registered_by_code=invite_ok,
+                invite_role=invite_role,
             )
+            if invite_ok and invite:
+                await mark_invite_used(invite, session)
             logger.info(
                 f"New user registered: tg_id={tg_id}, "
                 f"name={full_name}, group={study_group}"
@@ -134,10 +332,19 @@ async def process_study_group(message: types.Message, state: FSMContext):
             "✅ <b>Регистрация успешна!</b>\n\n"
             f"👤 <b>{full_name}</b>\n"
             f"📚 Группа: <b>{study_group}</b>\n"
-            f"🎭 Роль: <b>Студент</b>\n\n"
+            f"🎭 Роль: <b>{_role_label(UserRole.STUDENT)}</b>\n\n"
             "Используйте /help для списка команд.",
             parse_mode="HTML",
         )
+
+        if invite_ok:
+            await message.answer(
+                "✅ Инвайт активирован. Доступ к сдаче работ открыт.",
+                parse_mode="HTML",
+            )
+            from src.bot.handlers.campaign_router import cmd_submit
+
+            await cmd_submit(message, state)
 
     except Exception as e:
         logger.error(f"Failed to create user {tg_id}: {e}")
@@ -146,6 +353,33 @@ async def process_study_group(message: types.Message, state: FSMContext):
             "Используйте /start для повторной попытки."
         )
         await state.clear()
+
+
+@router.callback_query(StateFilter(RegistrationStates.waiting_for_role))
+async def process_role_selection(callback: types.CallbackQuery, state: FSMContext):
+    """Process role selection before registration."""
+    if not callback.data or not callback.data.startswith("role_"):
+        await callback.answer()
+        return
+
+    role_value = callback.data.replace("role_", "")
+    try:
+        role = UserRole(role_value)
+    except ValueError:
+        await callback.answer("❌ Неизвестная роль", show_alert=True)
+        return
+
+    data = await state.get_data()
+    invite_ok = data.get("invite_ok", False)
+    invite_role = data.get("invite_role")
+
+    await state.update_data(role=role)
+    await callback.message.answer(
+        "Для регистрации введите ваше <b>полное имя</b> (ФИО):",
+        parse_mode="HTML",
+    )
+    await state.set_state(RegistrationStates.waiting_for_full_name)
+    await callback.answer()
 
 
 @router.message(Command("help"))
@@ -165,6 +399,7 @@ async def cmd_help(message: types.Message, state: FSMContext):
         "/start - Начать работу с ботом\n"
         "/help - Показать эту справку\n"
         "/profile - Информация о профиле\n"
+        "/role - Изменить роль\n"
         "/campaigns - Активные кампании\n\n"
         "<b>Для студентов:</b>\n"
         "/submit - Загрузить работу на проверку\n"
@@ -176,7 +411,8 @@ async def cmd_help(message: types.Message, state: FSMContext):
         "/expert_stats - Ваша статистика\n\n"
         "<b>Для организаторов:</b>\n"
         "/create_campaign - Создать новую кампанию\n"
-        "/my_campaigns - Мои кампании",
+        "/my_campaigns - Мои кампании\n"
+        "/invites - Инвайты для ролей",
         parse_mode="HTML",
     )
 
@@ -195,14 +431,78 @@ async def cmd_profile(message: types.Message):
                 f"ID: <code>{user.tg_id}</code>\n"
                 f"Имя: <b>{user.full_name}</b>\n"
                 f"Группа: <b>{user.study_group or 'Не указана'}</b>\n"
-                f"Роль: <b>{user.role.value if hasattr(user.role, 'value') else user.role}</b>\n"
-                f"Статус: {'✅ Активен' if not user.is_banned else '⛔ Заблокирован'}",
+                f"Роль: <b>{_role_label(user.role)}</b>\n"
+                f"Статус: {'✅ Активен' if not user.is_banned else '⛔ Заблокирован'}\n"
+                f"Доступ к роли: {'✅ Да' if _has_invite_access(user) else '❌ Нет'}",
                 parse_mode="HTML",
             )
         else:
             await message.answer(
                 "❌ Вы не зарегистрированы. Используйте /start для регистрации."
             )
+
+
+@router.message(Command("role"))
+async def cmd_role(message: types.Message, state: FSMContext):
+    """Handle /role command to change user role."""
+    tg_id = message.from_user.id
+
+    async with session_scope() as session:
+        user = await get_user(tg_id=tg_id, session=session)
+
+        if not user:
+            await message.answer(
+                "❌ Вы не зарегистрированы. Используйте /start для регистрации."
+            )
+            return
+
+    await message.answer(
+        "🎭 Выберите новую роль:",
+        reply_markup=_build_role_keyboard(),
+        parse_mode="HTML",
+    )
+    await state.set_state(RoleChangeStates.waiting_for_role)
+
+
+@router.callback_query(StateFilter(RoleChangeStates.waiting_for_role))
+async def process_role_change(callback: types.CallbackQuery, state: FSMContext):
+    """Process role change for existing users."""
+    if not callback.data or not callback.data.startswith("role_"):
+        await callback.answer()
+        return
+
+    role_value = callback.data.replace("role_", "")
+    try:
+        role = UserRole(role_value)
+    except ValueError:
+        await callback.answer("❌ Неизвестная роль", show_alert=True)
+        return
+
+    tg_id = callback.from_user.id
+
+    async with session_scope() as session:
+        user = await get_user(tg_id=tg_id, session=session)
+
+        if not user:
+            await callback.answer("❌ Пользователь не найден", show_alert=True)
+            return
+
+        user = await update_user_role(tg_id=tg_id, role=role, session=session)
+
+    await state.clear()
+
+    message_text = (
+        "✅ Роль обновлена.\n\n"
+        f"Теперь вы: <b>{_role_label(role)}</b>"
+    )
+    if _role_requires_invite(role) and not _has_invite_access(user):
+        message_text += (
+            "\n\nДоступ к функциям роли будет открыт после инвайта. "
+            "Откройте ссылку приглашения"
+        )
+
+    await callback.message.edit_text(message_text, parse_mode="HTML")
+    await callback.answer()
 
 
 @router.message(Command("cancel"))

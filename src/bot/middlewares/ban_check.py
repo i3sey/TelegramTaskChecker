@@ -7,8 +7,8 @@ from aiogram.types import TelegramObject, User
 from aiogram.fsm.context import FSMContext
 
 from src.db.engine import session_scope
-from src.services.user_service import get_user
-from src.utils.logging import logger
+from src.bot.services.user_service import get_user
+from src.bot.utils.logging import logger
 
 
 class BanCheckMiddleware(BaseMiddleware):

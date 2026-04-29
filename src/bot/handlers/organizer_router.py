@@ -6,9 +6,24 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
+from src.db.engine import session_scope
+from src.db.models import UserRole
+from src.services.user_service import get_user
+from src.services.invite_service import create_invite
+
 
 router = Router()
 router.name = "organizer_router"
+
+
+def _build_invite_keyboard() -> types.InlineKeyboardMarkup:
+    """Build inline keyboard for invite generation."""
+    return types.InlineKeyboardMarkup(
+        inline_keyboard=[
+            [types.InlineKeyboardButton(text="🎓 Инвайт для студентов", callback_data="invite_student")],
+            [types.InlineKeyboardButton(text="🧑‍🏫 Инвайт для экспертов", callback_data="invite_expert")],
+        ]
+    )
 
 
 class OrganizerSessionState(StatesGroup):
@@ -18,33 +33,6 @@ class OrganizerSessionState(StatesGroup):
     setting_criteria = State()
     awaiting_session_name = State()
     awaiting_criteria = State()
-
-
-@router.message(Command("start"), F.text == "/start")
-async def cmd_start(message: types.Message, user_role: str = "organizer") -> None:
-    """
-    Handle /start command for organizer users.
-    
-    Displays welcome message and administrative capabilities.
-    
-    Args:
-        message: Telegram message object
-        user_role: User's role in the system
-    """
-    welcome_text = (
-        "👋 Welcome Organizer!\n\n"
-        "You have administrative access to the review system.\n\n"
-        "Available commands:\n"
-        "🆕 /create_session - Start a new review session\n"
-        "📋 /set_criteria - Define evaluation criteria\n"
-        "📊 /view_results - See all feedback and results\n"
-        "💾 /export - Export results to Google Sheets\n"
-        "👥 /manage_users - Manage system users\n"
-        "📈 /analytics - View system analytics\n\n"
-        "Let's manage the review process! 🎯"
-    )
-    
-    await message.answer(welcome_text)
 
 
 @router.message(Command("create_session"))
@@ -60,6 +48,12 @@ async def cmd_create_session(
         message: Telegram message object
         state: FSM context for managing conversation state
     """
+    async with session_scope() as session:
+        user = await get_user(tg_id=message.from_user.id, session=session)
+        if not user or user.role not in (UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER):
+            await message.answer("❌ Эта команда доступна только организаторам.")
+            return
+
     initial_text = (
         "🆕 Create New Review Session\n\n"
         "This will set up a new review cycle for submissions.\n\n"
@@ -70,6 +64,47 @@ async def cmd_create_session(
     
     await message.answer(initial_text)
     await state.set_state(OrganizerSessionState.awaiting_session_name)
+
+
+@router.message(Command("invites"))
+async def cmd_invites(message: types.Message) -> None:
+    """Show invite generation options for organizers."""
+    async with session_scope() as session:
+        user = await get_user(tg_id=message.from_user.id, session=session)
+        if not user or user.role not in (UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER):
+            await message.answer("❌ Эта команда доступна только организаторам.")
+            return
+
+    await message.answer(
+        "🔗 <b>Инвайты для ролей</b>\n\n"
+        "Выберите тип инвайта:",
+        reply_markup=_build_invite_keyboard(),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data.in_({"invite_student", "invite_expert"}))
+async def process_invite_create(callback: types.CallbackQuery) -> None:
+    """Create an invite link for the selected role."""
+    async with session_scope() as session:
+        user = await get_user(tg_id=callback.from_user.id, session=session)
+        if not user or user.role not in (UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER):
+            await callback.answer("❌ Только для организаторов", show_alert=True)
+            return
+
+        role = "student" if callback.data == "invite_student" else "expert"
+        invite = await create_invite(role=role, created_by=user.tg_id, session=session)
+
+    bot_info = await callback.bot.get_me()
+    invite_link = f"https://t.me/{bot_info.username}?start={invite.code}"
+
+    await callback.message.edit_text(
+        "✅ Инвайт создан.\n\n"
+        f"Роль: <b>{'Студент' if role == 'student' else 'Эксперт'}</b>\n"
+        f"Ссылка: {invite_link}",
+        parse_mode="HTML",
+    )
+    await callback.answer()
 
 
 @router.message(OrganizerSessionState.awaiting_session_name)
@@ -157,6 +192,12 @@ async def cmd_set_criteria(
         message: Telegram message object
         state: FSM context for managing conversation state
     """
+    async with session_scope() as session:
+        user = await get_user(tg_id=message.from_user.id, session=session)
+        if not user or user.role not in (UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER):
+            await message.answer("❌ Эта команда доступна только организаторам.")
+            return
+
     criteria_text = (
         "📋 Set Evaluation Criteria\n\n"
         "Define the criteria for evaluating submissions.\n"
@@ -210,7 +251,7 @@ async def process_criteria(
 
 
 @router.message(Command("view_results"))
-async def cmd_view_results(message: types.Message, user_id: int) -> None:
+async def cmd_view_results(message: types.Message) -> None:
     """
     Handle /view_results command to see all feedback and results.
     
@@ -220,24 +261,16 @@ async def cmd_view_results(message: types.Message, user_id: int) -> None:
         message: Telegram message object
         user_id: Telegram user ID
     """
-    results_text = (
-        "📊 Review Results Summary\n\n"
-        "Session: Python 101 - Week 3\n"
-        "Status: ✅ In Progress\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "📈 Statistics:\n"
-        "• Total Submissions: 23\n"
-        "• Reviewed: 15\n"
-        "• Pending: 8\n"
-        "• Average Rating: 3.6/5\n\n"
-        "👥 Top Performers:\n"
-        "1. Alice M. - Average: 4.8/5 (3 reviews)\n"
-        "2. Bob T. - Average: 4.2/5 (2 reviews)\n"
-        "3. Carol S. - Average: 4.0/5 (2 reviews)\n\n"
-        "Use /export to download detailed results."
+    async with session_scope() as session:
+        user = await get_user(tg_id=message.from_user.id, session=session)
+        if not user or user.role not in (UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER):
+            await message.answer("❌ Эта команда доступна только организаторам.")
+            return
+
+    await message.answer(
+        "⚠️ Просмотр результатов временно недоступен.\n"
+        "Функция будет добавлена позже."
     )
-    
-    await message.answer(results_text)
 
 
 @router.message(Command("export"))
@@ -250,19 +283,16 @@ async def cmd_export(message: types.Message) -> None:
     Args:
         message: Telegram message object
     """
-    export_text = (
-        "📊 Export Results\n\n"
-        "This will create a Google Sheets document with all review results.\n\n"
-        "🔗 Processing export...\n"
-        "⏳ Authenticating with Google Sheets API...\n"
-        "💾 Creating spreadsheet...\n\n"
-        "[Simulated - Google Sheets integration would be implemented here]\n\n"
-        "✅ Export complete!\n"
-        "📋 Spreadsheet: python-101-week3-results\n"
-        "🔗 Link: https://sheets.google.com/d/1234567890/edit"
+    async with session_scope() as session:
+        user = await get_user(tg_id=message.from_user.id, session=session)
+        if not user or user.role not in (UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER):
+            await message.answer("❌ Эта команда доступна только организаторам.")
+            return
+
+    await message.answer(
+        "⚠️ Экспорт в Google Sheets временно недоступен.\n"
+        "Функция будет добавлена позже."
     )
-    
-    await message.answer(export_text)
 
 
 @router.message(Command("manage_users"))
@@ -273,24 +303,16 @@ async def cmd_manage_users(message: types.Message) -> None:
     Args:
         message: Telegram message object
     """
-    users_text = (
-        "👥 User Management\n\n"
-        "Current Users:\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "📚 Students: 45\n"
-        "👨‍🏫 Experts: 8\n"
-        "🏢 Organizers: 2\n\n"
-        "Recent Activity:\n"
-        "✅ Added: Alice M. (Student) - 2 hours ago\n"
-        "✅ Added: Dr. Smith (Expert) - 1 day ago\n"
-        "❌ Removed: Test User - 3 days ago\n\n"
-        "Commands:\n"
-        "/add_user <telegram_id> <role>\n"
-        "/remove_user <telegram_id>\n"
-        "/list_users"
+    async with session_scope() as session:
+        user = await get_user(tg_id=message.from_user.id, session=session)
+        if not user or user.role not in (UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER):
+            await message.answer("❌ Эта команда доступна только организаторам.")
+            return
+
+    await message.answer(
+        "⚠️ Управление пользователями временно недоступно.\n"
+        "Функция будет добавлена позже."
     )
-    
-    await message.answer(users_text)
 
 
 @router.message(Command("analytics"))
@@ -301,24 +323,13 @@ async def cmd_analytics(message: types.Message) -> None:
     Args:
         message: Telegram message object
     """
-    analytics_text = (
-        "📈 System Analytics\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "Session: Python 101 - Week 3\n"
-        "Duration: 5 days\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "📊 Submission Analytics:\n"
-        "• Total: 23\n"
-        "• Avg. Score: 3.6/5\n"
-        "• Distribution: 🟢8 🟡10 🔴5\n\n"
-        "⏱️ Time Analytics:\n"
-        "• Avg. Review Time: 28 minutes\n"
-        "• Avg. Wait Time: 1.5 hours\n"
-        "• Peak Hours: 2-4 PM\n\n"
-        "👨‍🏫 Expert Performance:\n"
-        "• Most Active: Dr. Johnson (12 reviews)\n"
-        "• Highest Rated: Prof. Lee (4.8/5)\n"
-        "• Fastest: Assistant Smith (18 min avg)"
+    async with session_scope() as session:
+        user = await get_user(tg_id=message.from_user.id, session=session)
+        if not user or user.role not in (UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER):
+            await message.answer("❌ Эта команда доступна только организаторам.")
+            return
+
+    await message.answer(
+        "⚠️ Аналитика временно недоступна.\n"
+        "Функция будет добавлена позже."
     )
-    
-    await message.answer(analytics_text)
