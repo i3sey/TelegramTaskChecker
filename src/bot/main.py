@@ -1,10 +1,7 @@
 """Echo bot entry point."""
 
 import asyncio
-from aiogram import Bot, Dispatcher
-from aiogram.filters import Command
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
+from aiogram import Bot, Dispatcher, Router, types
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.session.aiohttp import AiohttpSession
 
@@ -16,16 +13,12 @@ from src.db.engine import init_db
 from src.bot.handlers.auth_router import router as auth_router
 from src.bot.handlers.campaign_router import router as campaign_router
 from src.bot.handlers.expert_router import router as expert_router
-from src.bot.middleware.ban_check import BanCheckMiddleware
-from src.utils.logging import logger
-from src.services.queue_service import queue_service
-from src.services.expired_locks import start_expired_locks_scheduler
-
-
-# FSM States for bot
-class BotStates(StatesGroup):
-    """Global bot states."""
-    pass
+from src.bot.handlers.student_router import router as student_router
+from src.bot.handlers.organizer_router import router as organizer_router
+from src.bot.middlewares.ban_check import BanCheckMiddleware
+from src.bot.utils.logging import logger
+from src.bot.services.queue_service import queue_service
+from src.bot.services.expired_locks import start_expired_locks_scheduler
 
 
 # Load environment
@@ -48,7 +41,6 @@ async def on_startup(bot: Bot) -> None:
     logger.info(f"Bot username: @{bot_info.username}")
     logger.info(f"Bot ID: {bot_info.id}")
 
-    # Start background task for expired locks
     start_expired_locks_scheduler(bot)
     logger.info("Started expired locks scheduler")
 
@@ -76,6 +68,7 @@ async def main() -> None:
 
     storage = MemoryStorage()
     dp = Dispatcher(storage=storage)
+    fallback_router = Router()
 
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
@@ -83,16 +76,20 @@ async def main() -> None:
     dp.message.middleware(BanCheckMiddleware())
 
     dp.include_router(auth_router)
+    dp.include_router(student_router)
     dp.include_router(campaign_router)
     dp.include_router(expert_router)
+    dp.include_router(organizer_router)
 
-    @dp.message()
-    async def fallback_handler(message):
+    @fallback_router.message()
+    async def fallback_handler(message: types.Message):
         await message.answer(
             "🤔 Я не понимаю это сообщение.\n"
             "Используйте /help для списка команд.",
             parse_mode="HTML",
         )
+
+    dp.include_router(fallback_router)
 
     logger.info("Starting bot...")
     try:

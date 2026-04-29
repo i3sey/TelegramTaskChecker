@@ -91,8 +91,21 @@ async def check_expert_role(message: types.Message) -> bool:
         if not user:
             await message.answer("❌ Вы не зарегистрированы. Используйте /start.")
             return False
-        if user.role != UserRole.EXPERT:
+        if user.role not in (UserRole.EXPERT, UserRole.EXPERT_ORGANIZER):
             await message.answer("⛔ Эта команда доступна только для экспертов.")
+            return False
+        if user.role != UserRole.EXPERT_ORGANIZER and (
+            not user.registered_by_code or user.invite_role != "expert"
+        ):
+            extra_hint = ""
+            if user.role == UserRole.EXPERT_ORGANIZER:
+                extra_hint = "\n\nВы организатор — используйте /invites, чтобы создать экспертный инвайт."
+            await message.answer(
+                "⛔ Для роли эксперта нужен инвайт. "
+                "Откройте ссылку приглашения"
+                f"{extra_hint}",
+                parse_mode="HTML",
+            )
             return False
         if user.is_banned:
             await message.answer("⛔ Ваш аккаунт заблокирован.")
@@ -134,8 +147,8 @@ async def send_submission_to_expert(
         )
 
     await message.answer(
-        "⬇️ Выберите оценку:",
-        reply_markup=get_score_keyboard(campaign.min_score, campaign.max_score)
+        "⬇️ Введите оценку числом.\n"
+        f"Диапазон: {campaign.min_score}–{campaign.max_score}",
     )
 
 
@@ -212,6 +225,7 @@ async def cmd_take(message: types.Message, state: FSMContext) -> None:
 
                 # Send to expert
                 await send_submission_to_expert(message, submission, campaign, author)
+                await state.set_state(ExpertReviewState.waiting_for_score)
                 return
 
         await message.answer(
@@ -257,31 +271,36 @@ async def cmd_return(message: types.Message, state: FSMContext) -> None:
 
 
 # Callback query handlers
-@router.callback_query(F.data.startswith("score_"))
-async def handle_score_callback(callback: types.CallbackQuery, state: FSMContext) -> None:
-    """Handle score button callback."""
-    if not callback.message or not isinstance(callback.message, types.Message):
-        return
-
-    tg_id = callback.from_user.id
-    message = callback.message
+@router.message(StateFilter(ExpertReviewState.waiting_for_score))
+async def process_score_input(message: types.Message, state: FSMContext) -> None:
+    """Process score input from expert."""
     data = await state.get_data()
     submission_id = data.get("submission_id")
+    campaign_id = data.get("campaign_id")
 
-    if not submission_id:
-        await callback.answer("У вас нет работы на проверке", show_alert=True)
+    if not submission_id or not campaign_id:
         await message.answer("⚠️ У вас нет работы на проверке. Используйте /take.")
         return
 
     try:
-        score = int(callback.data.split("_")[1])
-    except (ValueError, IndexError):
-        await callback.answer("Ошибка выбора оценки", show_alert=True)
+        score = int(message.text.strip())
+    except (ValueError, AttributeError):
+        await message.answer("❌ Введите оценку числом.")
         return
 
-    await state.update_data(score=score)
-    await callback.answer(f"Оценка: {score}")
+    async with session_scope() as session:
+        campaign = await get_campaign(campaign_id, session)
+        if not campaign:
+            await message.answer("❌ Кампания не найдена.")
+            return
 
+        if score < campaign.min_score or score > campaign.max_score:
+            await message.answer(
+                f"❌ Оценка должна быть в диапазоне {campaign.min_score}–{campaign.max_score}."
+            )
+            return
+
+    await state.update_data(score=score)
     await state.set_state(ExpertReviewState.waiting_for_comment)
     await message.answer(
         f"📝 <b>Вы выбрали оценку: {score}</b>\n\n"
@@ -360,6 +379,8 @@ async def handle_confirm_callback(callback: types.CallbackQuery, state: FSMConte
                     campaign_title=campaign.title if campaign else "",
                     score=score,
                     comment=comment_text,
+                    reviewer_name=reviewer.full_name if reviewer else None,
+                    is_expert_anon=campaign.is_expert_anon if campaign else True,
                 )
             except Exception as e:
                 logger.error(f"Failed to notify student: {e}")
