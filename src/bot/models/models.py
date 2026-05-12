@@ -95,6 +95,11 @@ class InviteCode(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     role: Mapped[str] = mapped_column(String(50), nullable=False)
+    campaign_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("campaigns.id", ondelete="CASCADE"),
+        nullable=True,
+    )
     created_by: Mapped[int] = mapped_column(BigInteger, nullable=False)
     uses: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     max_uses: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -106,6 +111,7 @@ class InviteCode(Base):
     )
 
     __table_args__ = (
+        Index("ix_invite_codes_campaign_id", "campaign_id"),
         Index("ix_invite_codes_role", "role"),
         Index("ix_invite_codes_active", "is_active"),
     )
@@ -125,6 +131,12 @@ class Campaign(Base):
     max_score: Mapped[int] = mapped_column(Integer, default=100, nullable=False)
     ttl_minutes: Mapped[int] = mapped_column(Integer, default=1440, nullable=False)
     is_expert_anon: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    p2p_reviews_required: Mapped[int] = mapped_column(
+        Integer,
+        default=3,
+        nullable=False,
+    )
+    voting_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

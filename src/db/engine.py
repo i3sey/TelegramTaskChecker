@@ -53,6 +53,30 @@ async def _ensure_schema(conn) -> None:
             "ADD COLUMN IF NOT EXISTS invite_role VARCHAR(50)"
         )
     )
+    await conn.execute(
+        text(
+            "ALTER TABLE invite_codes "
+            "ADD COLUMN IF NOT EXISTS campaign_id INTEGER"
+        )
+    )
+    await conn.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_invite_codes_campaign_id "
+            "ON invite_codes (campaign_id)"
+        )
+    )
+    await conn.execute(
+        text(
+            "ALTER TABLE campaigns "
+            "ADD COLUMN IF NOT EXISTS p2p_reviews_required INTEGER NOT NULL DEFAULT 3"
+        )
+    )
+    await conn.execute(
+        text(
+            "ALTER TABLE campaigns "
+            "ADD COLUMN IF NOT EXISTS voting_type VARCHAR(20)"
+        )
+    )
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

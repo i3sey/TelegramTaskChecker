@@ -80,6 +80,8 @@ class CampaignService:
         max_score: int,
         ttl_minutes: int,
         is_expert_anon: bool,
+        p2p_reviews_required: int,
+        voting_type: str | None,
         organizer_id: int,
         session: AsyncSession
     ) -> Campaign:
@@ -106,6 +108,8 @@ class CampaignService:
             max_score=max_score,
             ttl_minutes=ttl_minutes,
             is_expert_anon=is_expert_anon,
+            p2p_reviews_required=p2p_reviews_required,
+            voting_type=voting_type,
         )
         session.add(campaign)
         await session.flush()
@@ -189,13 +193,16 @@ async def create_campaign(
     max_score: int,
     ttl_minutes: int,
     is_expert_anon: bool,
+    p2p_reviews_required: int,
+    voting_type: str | None,
     organizer_id: int,
     session: AsyncSession
 ) -> Campaign:
     """Create a new campaign."""
     return await CampaignService.create_campaign(
         title, campaign_type, min_score, max_score,
-        ttl_minutes, is_expert_anon, organizer_id, session
+        ttl_minutes, is_expert_anon, p2p_reviews_required,
+        voting_type, organizer_id, session
     )
 
 

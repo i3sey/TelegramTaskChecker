@@ -6,6 +6,8 @@ class CampaignCreationStates(StatesGroup):
     """States for campaign creation flow."""
     waiting_for_title = State()
     waiting_for_type = State()
+    waiting_for_p2p_reviews = State()
+    waiting_for_voting_type = State()
     waiting_for_min_score = State()
     waiting_for_max_score = State()
     waiting_for_ttl = State()

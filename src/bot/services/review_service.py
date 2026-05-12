@@ -1,5 +1,5 @@
 """Review service for database operations."""
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.bot.models import Review, Submission, SubmissionStatus
@@ -65,6 +65,23 @@ class ReviewService:
         return result.scalar_one_or_none()
 
     @staticmethod
+    async def get_review_by_submission_and_reviewer(
+        submission_id: int,
+        reviewer_id: int,
+        session: AsyncSession,
+    ) -> Review | None:
+        """Get a review by submission and reviewer."""
+        result = await session.execute(
+            select(Review).where(
+                and_(
+                    Review.submission_id == submission_id,
+                    Review.reviewer_id == reviewer_id,
+                )
+            )
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
     async def get_submission_reviews(
         submission_id: int,
         session: AsyncSession
@@ -107,6 +124,38 @@ class ReviewService:
             .order_by(Review.created_at.desc())
         )
         return list(result.scalars().all())
+
+    @staticmethod
+    async def count_reviewer_reviews_for_campaign(
+        reviewer_id: int,
+        campaign_id: int,
+        session: AsyncSession,
+    ) -> int:
+        """Count reviews by reviewer within a campaign."""
+        from src.bot.models import Submission
+
+        result = await session.execute(
+            select(func.count(Review.id))
+            .join(Submission, Review.submission_id == Submission.id)
+            .where(
+                and_(
+                    Review.reviewer_id == reviewer_id,
+                    Submission.campaign_id == campaign_id,
+                )
+            )
+        )
+        return int(result.scalar_one() or 0)
+
+    @staticmethod
+    async def count_submission_reviews(
+        submission_id: int,
+        session: AsyncSession,
+    ) -> int:
+        """Count reviews for a submission."""
+        result = await session.execute(
+            select(func.count(Review.id)).where(Review.submission_id == submission_id)
+        )
+        return int(result.scalar_one() or 0)
 
     @staticmethod
     async def update_review(
@@ -202,6 +251,17 @@ async def get_review(review_id: int, session: AsyncSession) -> Review | None:
     return await ReviewService.get_review(review_id, session)
 
 
+async def get_review_by_submission_and_reviewer(
+    submission_id: int,
+    reviewer_id: int,
+    session: AsyncSession,
+) -> Review | None:
+    """Get review by submission and reviewer."""
+    return await ReviewService.get_review_by_submission_and_reviewer(
+        submission_id, reviewer_id, session
+    )
+
+
 async def get_submission_reviews(
     submission_id: int,
     session: AsyncSession
@@ -216,6 +276,25 @@ async def get_expert_reviews(
 ) -> list[Review]:
     """Get all reviews by an expert."""
     return await ReviewService.get_expert_reviews(reviewer_id, session)
+
+
+async def count_reviewer_reviews_for_campaign(
+    reviewer_id: int,
+    campaign_id: int,
+    session: AsyncSession,
+) -> int:
+    """Count reviews by reviewer for a campaign."""
+    return await ReviewService.count_reviewer_reviews_for_campaign(
+        reviewer_id, campaign_id, session
+    )
+
+
+async def count_submission_reviews(
+    submission_id: int,
+    session: AsyncSession,
+) -> int:
+    """Count reviews for a submission."""
+    return await ReviewService.count_submission_reviews(submission_id, session)
 
 
 async def update_review(

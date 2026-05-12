@@ -70,6 +70,12 @@ class QueueService:
             ex=ttl_seconds,
             nx=True,
         )
+        if result:
+            await client.set(
+                self._expert_submissions_key(expert_id),
+                str(submission_id),
+                ex=ttl_seconds,
+            )
         return result is not None
 
     async def unlock_submission(self, submission_id: int) -> bool:
@@ -84,8 +90,27 @@ class QueueService:
         """
         client = await self.get_client()
         key = self._active_review_key(submission_id)
+        lock_info = await self.get_lock_info(submission_id)
         result = await client.delete(key)
+        if lock_info and lock_info.get("expert_id") is not None:
+            await client.delete(self._expert_submissions_key(int(lock_info["expert_id"])))
         return result > 0
+
+    async def get_expert_current_submission(self, expert_id: int) -> int | None:
+        """Get the currently assigned submission for an expert."""
+        client = await self.get_client()
+        value = await client.get(self._expert_submissions_key(expert_id))
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except ValueError:
+            return None
+
+    async def clear_expert_current_submission(self, expert_id: int) -> None:
+        """Clear the cached current submission for an expert."""
+        client = await self.get_client()
+        await client.delete(self._expert_submissions_key(expert_id))
 
     async def is_submission_locked(self, submission_id: int) -> bool:
         """Check if submission is currently locked."""

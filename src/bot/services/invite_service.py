@@ -18,6 +18,7 @@ def generate_invite_code(length: int = 10) -> str:
 async def create_invite(
     role: str,
     created_by: int,
+    campaign_id: int,
     session: AsyncSession,
     max_uses: int | None = None,
 ) -> InviteCode:
@@ -26,12 +27,15 @@ async def create_invite(
     invite = InviteCode(
         code=code,
         role=role,
+        campaign_id=campaign_id,
         created_by=created_by,
         max_uses=max_uses,
     )
     session.add(invite)
     await session.flush()
-    logger.info(f"Created invite code {code} for role {role} by {created_by}")
+    logger.info(
+        f"Created invite code {code} for role {role} by {created_by} for campaign {campaign_id}"
+    )
     return invite
 
 

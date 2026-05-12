@@ -10,14 +10,26 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from src.config import config
 from src.db.engine import session_scope
 from src.db.models import UserRole, SubmissionStatus, User, Campaign
-from src.services.user_service import get_user
-from src.services.submission_service import get_submission, update_submission_status
-from src.services.review_service import create_review, count_pending_submissions, get_submission_pending
-from src.services.campaign_service import get_campaign
-from src.services.queue_service import queue_service, QueueService
-from src.services.sheets_service import SheetsService
-from src.services.notification_service import NotificationService
-from src.utils.logging import logger
+from src.bot.services.user_service import get_user
+from src.bot.services.submission_service import get_submission, update_submission_status
+from src.bot.services.review_service import create_review, count_pending_submissions, get_submission_pending
+from src.bot.services.campaign_service import get_campaign
+from src.bot.services.queue_service import queue_service, QueueService
+from src.bot.services.sheets_service import SheetsService
+from src.bot.services.notification_service import NotificationService
+from src.bot.utils.logging import logger
+from src.bot.keyboards import (
+    BTN_QUEUE,
+    BTN_TAKE,
+    BTN_RETURN,
+    BTN_EXPERT_STATS,
+    BTN_MORE,
+    build_expert_more_keyboard,
+    build_comment_decision_keyboard,
+    build_review_confirmation_keyboard,
+    build_post_review_keyboard,
+)
+from src.bot.ui import format_ttl_minutes
 
 
 def _get_sheets_service() -> SheetsService | None:
@@ -75,12 +87,7 @@ def get_score_keyboard(min_score: int, max_score: int) -> InlineKeyboardMarkup:
 
 def get_confirm_keyboard() -> InlineKeyboardMarkup:
     """Generate confirmation keyboard for review submission."""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="Подтвердить", callback_data="confirm_submit"),
-            InlineKeyboardButton(text="Отмена", callback_data="cancel_review"),
-        ]
-    ])
+    return build_review_confirmation_keyboard()
 
 
 async def check_expert_role(message: types.Message) -> bool:
@@ -94,12 +101,10 @@ async def check_expert_role(message: types.Message) -> bool:
         if user.role not in (UserRole.EXPERT, UserRole.EXPERT_ORGANIZER):
             await message.answer("⛔ Эта команда доступна только для экспертов.")
             return False
-        if user.role != UserRole.EXPERT_ORGANIZER and (
+        if user.role == UserRole.EXPERT and (
             not user.registered_by_code or user.invite_role != "expert"
         ):
             extra_hint = ""
-            if user.role == UserRole.EXPERT_ORGANIZER:
-                extra_hint = "\n\nВы организатор — используйте /invites, чтобы создать экспертный инвайт."
             await message.answer(
                 "⛔ Для роли эксперта нужен инвайт. "
                 "Откройте ссылку приглашения"
@@ -120,36 +125,69 @@ async def send_submission_to_expert(
     author: User
 ) -> None:
     """Send submission file to expert with scoring interface."""
+    caption = (
+        f"📄 <b>Новая работа для проверки</b>\n\n"
+        f"📋 Кампания: <b>{campaign.title}</b>\n"
+        f"👤 Студент: <b>{author.full_name}</b>\n"
+        f"📚 Группа: <b>{author.study_group or 'Не указана'}</b>\n"
+        f"🆔 Работа: <code>{submission.id}</code>\n"
+        f"🕒 Загружена: <code>{submission.created_at.strftime('%d.%m.%Y %H:%M')}</code>\n"
+        f"⏳ Время на проверку: <b>{format_ttl_minutes(campaign.ttl_minutes)}</b>\n\n"
+        f"Оценивание: от <b>{campaign.min_score}</b> до <b>{campaign.max_score}</b>.\n"
+        "Дальше: введите оценку → напишите комментарий → подтвердите результат."
+    )
     try:
         await message.answer_document(
             document=submission.file_id,
-            caption=(
-                f"📄 <b>Новая работа для проверки</b>\n\n"
-                f"📋 Кампания: <b>{campaign.title}</b>\n"
-                f"👤 Студент: <b>{author.full_name}</b>\n"
-                f"📚 Группа: <b>{author.study_group or 'Не указана'}</b>\n"
-                f"🆔 ID: <code>{submission.id}</code>\n"
-                f"📅 Загружено: <code>{submission.created_at.strftime('%d.%m.%Y %H:%M')}</code>\n\n"
-                f"⬇️ Оцените работу от <b>{campaign.min_score}</b> до <b>{campaign.max_score}</b>:"
-            ),
+            caption=caption,
             parse_mode="HTML",
         )
     except Exception as e:
         logger.error(f"Failed to send file {submission.file_id}: {e}")
         await message.answer(
-            f"📄 <b>Новая работа для проверки</b>\n\n"
-            f"📋 Кампания: <b>{campaign.title}</b>\n"
-            f"👤 Студент: <b>{author.full_name}</b>\n"
-            f"📚 Группа: <b>{author.study_group or 'Не указана'}</b>\n"
-            f"🆔 ID: <code>{submission.id}</code>\n"
-            f"⚠️ Файл недоступен для отправки",
+            caption + "\n\n⚠️ Файл не удалось отправить, но вы всё равно можете выставить оценку.",
             parse_mode="HTML",
         )
 
     await message.answer(
         "⬇️ Введите оценку числом.\n"
-        f"Диапазон: {campaign.min_score}–{campaign.max_score}",
+        f"Допустимый диапазон: {campaign.min_score}–{campaign.max_score}.",
     )
+
+
+async def _deliver_current_submission(
+    message: types.Message,
+    state: FSMContext,
+    submission_id: int,
+) -> bool:
+    """Resend the currently assigned submission to an expert."""
+    tg_id = message.from_user.id
+
+    async with session_scope() as session:
+        submission = await get_submission(submission_id, session)
+        if not submission:
+            await message.answer("⚠️ Текущая работа не найдена. Нажмите /take еще раз.")
+            await queue_service.clear_expert_current_submission(tg_id)
+            await state.clear()
+            return False
+
+        campaign = await get_campaign(submission.campaign_id, session)
+        author = await get_user(tg_id=submission.author_id, session=session)
+        if not campaign or not author:
+            await message.answer("⚠️ Не удалось восстановить текущую работу. Нажмите /take еще раз.")
+            await queue_service.clear_expert_current_submission(tg_id)
+            await state.clear()
+            return False
+
+    await state.set_state(ExpertReviewState.reviewing_submission)
+    await state.update_data(
+        submission_id=submission.id,
+        campaign_id=submission.campaign_id,
+        ttl_minutes=campaign.ttl_minutes,
+    )
+    await send_submission_to_expert(message, submission, campaign, author)
+    await state.set_state(ExpertReviewState.waiting_for_score)
+    return True
 
 
 # Command handlers
@@ -185,6 +223,20 @@ async def cmd_take(message: types.Message, state: FSMContext) -> None:
     tg_id = message.from_user.id
 
     logger.info(f"Expert {tg_id} trying to take a submission")
+
+    current_submission_id = await queue_service.get_expert_current_submission(tg_id)
+    if current_submission_id is not None:
+        lock_info = await queue_service.get_lock_info(current_submission_id)
+        if lock_info and lock_info.get("expert_id") == tg_id:
+            await message.answer(
+                "ℹ️ <b>У вас уже есть работа на проверке.</b>\n"
+                "Показываю её ещё раз, чтобы вы могли продолжить.",
+                parse_mode="HTML",
+            )
+            if await _deliver_current_submission(message, state, current_submission_id):
+                return
+        else:
+            await queue_service.clear_expert_current_submission(tg_id)
 
     async with session_scope() as session:
         submissions = await get_submission_pending(session, limit=10)
@@ -270,6 +322,58 @@ async def cmd_return(message: types.Message, state: FSMContext) -> None:
     )
 
 
+# Reply-keyboard handlers for expert actions
+@router.message(F.text == BTN_QUEUE)
+async def btn_queue(message: types.Message) -> None:
+    await cmd_queue(message)
+
+
+@router.message(F.text == BTN_TAKE)
+async def btn_take(message: types.Message, state: FSMContext) -> None:
+    await cmd_take(message, state)
+
+
+@router.message(F.text == BTN_RETURN)
+async def btn_return(message: types.Message, state: FSMContext) -> None:
+    await cmd_return(message, state)
+
+
+@router.message(F.text == BTN_EXPERT_STATS)
+async def btn_expert_stats(message: types.Message) -> None:
+    await cmd_expert_stats(message)
+
+
+@router.callback_query(F.data == "expert_take_next")
+async def expert_take_next(callback: types.CallbackQuery, state: FSMContext) -> None:
+    if not callback.message:
+        await callback.answer("Ошибка: не удалось получить сообщение", show_alert=True)
+        return
+    if not await check_expert_role(callback.message):
+        return
+    await cmd_take(callback.message, state)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "expert_show_stats")
+async def expert_show_stats(callback: types.CallbackQuery) -> None:
+    if not callback.message:
+        await callback.answer("Ошибка: не удалось получить сообщение", show_alert=True)
+        return
+    if not await check_expert_role(callback.message):
+        return
+    await cmd_expert_stats(callback.message)
+    await callback.answer()
+
+
+@router.message(F.text == BTN_MORE)
+async def btn_more(message: types.Message) -> None:
+    await message.answer(
+        "⚙️ <b>Дополнительные действия</b>",
+        parse_mode="HTML",
+        reply_markup=build_expert_more_keyboard(),
+    )
+
+
 # Callback query handlers
 @router.message(StateFilter(ExpertReviewState.waiting_for_score))
 async def process_score_input(message: types.Message, state: FSMContext) -> None:
@@ -303,10 +407,11 @@ async def process_score_input(message: types.Message, state: FSMContext) -> None
     await state.update_data(score=score)
     await state.set_state(ExpertReviewState.waiting_for_comment)
     await message.answer(
-        f"📝 <b>Вы выбрали оценку: {score}</b>\n\n"
-        "Введите комментарий к работе (или отправьте 'пропустить' для пустого комментария):",
+        f"📝 <b>Оценка сохранена: {score}</b>\n\n"
+        "Теперь отправьте текстовый комментарий к работе.\n"
+        "Если комментарий не нужен, нажмите кнопку ниже.",
         parse_mode="HTML",
-        reply_markup=get_confirm_keyboard()
+        reply_markup=build_comment_decision_keyboard(),
     )
 
 
@@ -390,11 +495,12 @@ async def handle_confirm_callback(callback: types.CallbackQuery, state: FSMConte
     await callback.answer("Рецензия сохранена!")
     await message.answer(
         f"✅ <b>Рецензия сохранена!</b>\n\n"
-        f"📋 ID работы: <code>{submission_id}</code>\n"
+        f"🆔 Работа: <code>{submission_id}</code>\n"
         f"⭐ Оценка: <b>{score}</b>\n"
         f"💬 Комментарий: <b>{comment_text or 'Без комментария'}</b>\n\n"
-        "Используйте /take для следующей работы.",
+        "Можно сразу взять следующую работу или открыть статистику.",
         parse_mode="HTML",
+        reply_markup=build_post_review_keyboard(),
     )
 
 
@@ -404,23 +510,56 @@ async def handle_cancel_callback(callback: types.CallbackQuery, state: FSMContex
     if not callback.message or not isinstance(callback.message, types.Message):
         return
 
-    await callback.answer("Отменено")
+    data = await state.get_data()
+    submission_id = data.get("submission_id")
+    if submission_id:
+        await queue_service.unlock_submission(submission_id)
+        async with session_scope() as session:
+            await update_submission_status(
+                submission_id,
+                SubmissionStatus.UPLOADED,
+                session
+            )
+    await state.clear()
+    await callback.answer("Работа возвращена в очередь")
     await callback.message.answer(
-        "❌ Действие отменено.\n\n"
-        "Используйте /return для возврата работы в очередь.",
+        "↩️ <b>Работа возвращена в очередь.</b>\n\n"
+        "Вы можете взять другую работу командой /take.",
+        parse_mode="HTML",
     )
 
 
 @router.message(StateFilter(ExpertReviewState.waiting_for_comment))
 async def process_comment(message: types.Message, state: FSMContext) -> None:
     """Process expert's comment input."""
+    if not message.text:
+        await message.answer(
+            "⚠️ Сейчас можно отправить только текстовый комментарий.\n"
+            "Если комментарий не нужен, нажмите кнопку «Отправить без комментария».",
+            reply_markup=build_comment_decision_keyboard(),
+        )
+        return
+
     comment_text = message.text.strip()
     await state.update_data(comment_text=comment_text)
 
     await message.answer(
-        "💬 Комментарий сохранен.\n\n"
-        "Нажмите 'Подтвердить' для сохранения рецензии.",
+        "💬 <b>Комментарий сохранён.</b>\n\n"
+        f"Текст: {comment_text}\n\n"
+        "Нажмите «Подтвердить», чтобы завершить проверку.",
+        parse_mode="HTML",
         reply_markup=get_confirm_keyboard()
+    )
+
+
+@router.callback_query(F.data == "comment_skip")
+async def handle_comment_skip(callback: types.CallbackQuery, state: FSMContext) -> None:
+    await state.update_data(comment_text=None)
+    await callback.answer("Комментарий будет пропущен")
+    await callback.message.answer(
+        "💬 Комментарий будет пропущен.\n"
+        "Нажмите «Подтвердить», чтобы сохранить результат.",
+        reply_markup=get_confirm_keyboard(),
     )
 
 
@@ -434,7 +573,7 @@ async def cmd_expert_stats(message: types.Message) -> None:
     logger.info(f"Expert {tg_id} requested stats")
 
     async with session_scope() as session:
-        from src.services.review_service import get_expert_reviews
+        from src.bot.services.review_service import get_expert_reviews
         reviews = await get_expert_reviews(tg_id, session)
 
         total_reviews = len(reviews)

@@ -3,7 +3,7 @@
 import os
 from typing import Literal, Optional
 
-from src.utils.logging import logger
+from src.bot.utils.logging import logger
 
 
 # Allowed file extensions (lowercase)
@@ -155,7 +155,7 @@ def validate_file(filename: str, size: int) -> tuple[bool, Optional[str]]:
         If valid, error_message is None
     """
     if not validate_file_extension(filename):
-        return False, f"❌ Файл формат не поддерживается.\nРазрешены: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
+        return False, f"❌ Формат файла не поддерживается.\nРазрешены: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
 
     if not validate_file_size(size):
         max_mb = MAX_FILE_SIZE / (1024 * 1024)

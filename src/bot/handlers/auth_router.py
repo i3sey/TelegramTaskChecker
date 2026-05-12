@@ -1,6 +1,6 @@
 """Authentication router for user registration."""
 
-from aiogram import Router, types
+from aiogram import Router, types, F
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -21,6 +21,19 @@ from src.bot.services.invite_service import (
     mark_invite_used,
 )
 from src.bot.utils.logging import logger
+from src.bot.keyboards import (
+    get_keyboard_for_role,
+    BTN_PROFILE,
+    BTN_HELP,
+    BTN_ROLE,
+    build_post_registration_keyboard,
+)
+from src.bot.ui import (
+    role_label,
+    registration_welcome_text,
+    help_text_for_role,
+    profile_text,
+)
 
 
 # Create router
@@ -29,13 +42,7 @@ router = Router()
 
 def _role_label(role: UserRole) -> str:
     """Get human-readable label for role selection."""
-    labels = {
-        UserRole.STUDENT: "🎓 Студент",
-        UserRole.EXPERT: "🧑‍🏫 Эксперт",
-        UserRole.EXPERT_ORGANIZER: "🧑‍🏫+🧑‍💼 Эксперт+Организатор",
-        UserRole.ORGANIZER: "🧑‍💼 Организатор",
-    }
-    return labels.get(role, str(role))
+    return role_label(role)
 
 
 def _build_role_keyboard() -> InlineKeyboardMarkup:
@@ -151,12 +158,9 @@ async def cmd_start(message: types.Message, state: FSMContext):
                 "❓ /help - Помощь"
                 f"{extra_notice}",
                 parse_mode="HTML",
+                reply_markup=get_keyboard_for_role(existing_user.role),
             )
 
-            if invite_ok and invite_role == "student" and existing_user.role == UserRole.STUDENT:
-                from src.bot.handlers.campaign_router import cmd_submit
-
-                await cmd_submit(message, state)
         else:
             await state.update_data(
                 invite_role=invite_role,
@@ -174,7 +178,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
                 await state.set_state(RegistrationStates.waiting_for_full_name)
             else:
                 await message.answer(
-                    "👤 <b>Выберите роль для регистрации:</b>",
+                    registration_welcome_text(),
                     reply_markup=_build_role_keyboard(),
                     parse_mode="HTML",
                 )
@@ -243,19 +247,19 @@ async def process_full_name(message: types.Message, state: FSMContext):
 
         await state.clear()
 
+        access_note = ""
+        if invite_ok and invite_role == "expert":
+            access_note = "\n\n✅ Инвайт активирован. Доступ к проверке работ открыт."
+
         await message.answer(
             "✅ <b>Регистрация успешна!</b>\n\n"
             f"👤 <b>{full_name}</b>\n"
-            f"🎭 Роль: <b>{_role_label(role)}</b>\n\n"
+            f"🎭 Роль: <b>{_role_label(role)}</b>"
+            f"{access_note}\n\n"
             "Используйте /help для списка команд.",
             parse_mode="HTML",
+            reply_markup=get_keyboard_for_role(role),
         )
-
-        if invite_ok and invite_role == "expert":
-            await message.answer(
-                "✅ Инвайт активирован. Доступ к проверке работ открыт.",
-                parse_mode="HTML",
-            )
     except Exception as e:
         logger.error(f"Failed to create user {message.from_user.id}: {e}")
         await message.answer(
@@ -328,20 +332,26 @@ async def process_study_group(message: types.Message, state: FSMContext):
         await state.clear()
 
         # Send success message
+        access_note = ""
+        if invite_ok:
+            access_note = "\n\n✅ Инвайт активирован. Доступ к сдаче работ открыт."
+
         await message.answer(
             "✅ <b>Регистрация успешна!</b>\n\n"
             f"👤 <b>{full_name}</b>\n"
             f"📚 Группа: <b>{study_group}</b>\n"
-            f"🎭 Роль: <b>{_role_label(UserRole.STUDENT)}</b>\n\n"
-            "Используйте /help для списка команд.",
+            f"🎭 Роль: <b>{_role_label(UserRole.STUDENT)}</b>"
+            f"{access_note}\n\n"
+            "Теперь вы можете выбрать кампанию и загрузить работу.",
             parse_mode="HTML",
+            reply_markup=get_keyboard_for_role(UserRole.STUDENT),
+        )
+        await message.answer(
+            "Быстрые действия:",
+            reply_markup=build_post_registration_keyboard(),
         )
 
         if invite_ok:
-            await message.answer(
-                "✅ Инвайт активирован. Доступ к сдаче работ открыт.",
-                parse_mode="HTML",
-            )
             from src.bot.handlers.campaign_router import cmd_submit
 
             await cmd_submit(message, state)
@@ -393,26 +403,14 @@ async def cmd_help(message: types.Message, state: FSMContext):
         )
         return
 
+    user_role = None
+    async with session_scope() as session:
+        user = await get_user(tg_id=message.from_user.id, session=session)
+        if user:
+            user_role = user.role
+
     await message.answer(
-        "📖 <b>Справка по командам:</b>\n\n"
-        "<b>Общие:</b>\n"
-        "/start - Начать работу с ботом\n"
-        "/help - Показать эту справку\n"
-        "/profile - Информация о профиле\n"
-        "/role - Изменить роль\n"
-        "/campaigns - Активные кампании\n\n"
-        "<b>Для студентов:</b>\n"
-        "/submit - Загрузить работу на проверку\n"
-        "/my_submissions - Мои загруженные работы\n\n"
-        "<b>Для экспертов:</b>\n"
-        "/queue - Очередь работ на проверку\n"
-        "/take - Взять работу на проверку\n"
-        "/return - Вернуть работу в очередь\n"
-        "/expert_stats - Ваша статистика\n\n"
-        "<b>Для организаторов:</b>\n"
-        "/create_campaign - Создать новую кампанию\n"
-        "/my_campaigns - Мои кампании\n"
-        "/invites - Инвайты для ролей",
+        help_text_for_role(user_role),
         parse_mode="HTML",
     )
 
@@ -427,19 +425,18 @@ async def cmd_profile(message: types.Message):
 
         if user:
             await message.answer(
-                "👤 <b>Ваш профиль:</b>\n\n"
-                f"ID: <code>{user.tg_id}</code>\n"
-                f"Имя: <b>{user.full_name}</b>\n"
-                f"Группа: <b>{user.study_group or 'Не указана'}</b>\n"
-                f"Роль: <b>{_role_label(user.role)}</b>\n"
-                f"Статус: {'✅ Активен' if not user.is_banned else '⛔ Заблокирован'}\n"
-                f"Доступ к роли: {'✅ Да' if _has_invite_access(user) else '❌ Нет'}",
+                profile_text(user),
                 parse_mode="HTML",
             )
         else:
             await message.answer(
                 "❌ Вы не зарегистрированы. Используйте /start для регистрации."
             )
+
+
+@router.message(F.text == BTN_PROFILE)
+async def btn_profile(message: types.Message):
+    await cmd_profile(message)
 
 
 @router.message(Command("role"))
@@ -462,6 +459,11 @@ async def cmd_role(message: types.Message, state: FSMContext):
         parse_mode="HTML",
     )
     await state.set_state(RoleChangeStates.waiting_for_role)
+
+
+@router.message(F.text == BTN_ROLE)
+async def btn_role(message: types.Message, state: FSMContext):
+    await cmd_role(message, state)
 
 
 @router.callback_query(StateFilter(RoleChangeStates.waiting_for_role))
@@ -501,7 +503,11 @@ async def process_role_change(callback: types.CallbackQuery, state: FSMContext):
             "Откройте ссылку приглашения"
         )
 
-    await callback.message.edit_text(message_text, parse_mode="HTML")
+    await callback.message.edit_text(
+        message_text,
+        parse_mode="HTML",
+        reply_markup=get_keyboard_for_role(user.role),
+    )
     await callback.answer()
 
 
@@ -514,11 +520,49 @@ async def cmd_cancel(message: types.Message, state: FSMContext):
         await state.clear()
         logger.info(f"User {message.from_user.id} cancelled registration")
         await message.answer(
-            "❌ <b>Регистрация отменена.</b>\n\n"
-            "Используйте /start для начала заново.",
+            "❌ <b>Операция отменена.</b>\n\n"
+            "Используйте /start для начала заново или /help для подсказок.",
             parse_mode="HTML",
         )
     else:
         await message.answer(
             "ℹ️ Нет активной операции для отмены."
         )
+
+
+@router.message(F.text == BTN_HELP)
+async def btn_help(message: types.Message, state: FSMContext):
+    await cmd_help(message, state)
+
+
+@router.callback_query(F.data == "menu_profile")
+async def menu_profile(callback: types.CallbackQuery) -> None:
+    if not callback.message:
+        await callback.answer("❌ Ошибка: не удалось получить сообщение", show_alert=True)
+        return
+    
+    tg_id = callback.from_user.id
+    async with session_scope() as session:
+        user = await get_user(tg_id=tg_id, session=session)
+
+        if user:
+            await callback.message.answer(
+                profile_text(user),
+                parse_mode="HTML",
+            )
+        else:
+            await callback.message.answer(
+                "❌ Вы не зарегистрированы. Используйте /start для регистрации."
+            )
+    
+    await callback.answer()
+
+
+@router.callback_query(F.data == "menu_help")
+async def menu_help(callback: types.CallbackQuery, state: FSMContext) -> None:
+    if not callback.message:
+        await callback.answer("❌ Ошибка: не удалось получить сообщение", show_alert=True)
+        return
+    
+    await cmd_help(callback.message, state)
+    await callback.answer()
