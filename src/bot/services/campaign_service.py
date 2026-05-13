@@ -1,4 +1,5 @@
 """Campaign service for database operations."""
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,6 +9,46 @@ from src.bot.utils.logging import logger
 
 class CampaignService:
     """Service for campaign-related database operations."""
+
+    @staticmethod
+    def _campaign_deadline(campaign: Campaign) -> datetime | None:
+        """Calculate campaign deadline from creation time and TTL."""
+        if campaign.campaign_deadline_at is not None:
+            deadline = campaign.campaign_deadline_at
+            if deadline.tzinfo is None:
+                deadline = deadline.replace(tzinfo=timezone.utc)
+            return deadline
+
+        if not campaign.created_at or campaign.ttl_minutes is None:
+            return None
+
+        created_at = campaign.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        return created_at + timedelta(minutes=campaign.ttl_minutes)
+
+    @staticmethod
+    async def _deactivate_expired_campaigns(session: AsyncSession) -> None:
+        """Mark expired active campaigns as inactive."""
+        result = await session.execute(
+            select(Campaign).where(Campaign.is_active == True)
+        )
+        active_campaigns = list(result.scalars().all())
+        now = datetime.now(timezone.utc)
+
+        changed = False
+        for campaign in active_campaigns:
+            deadline = CampaignService._campaign_deadline(campaign)
+            if deadline and deadline <= now:
+                campaign.is_active = False
+                changed = True
+                logger.info(
+                    "Campaign auto-completed by deadline: "
+                    f"id={campaign.id}, title='{campaign.title}'"
+                )
+
+        if changed:
+            await session.flush()
 
     @staticmethod
     async def get_campaign(
@@ -40,6 +81,7 @@ class CampaignService:
         Returns:
             List of active Campaign objects
         """
+        await CampaignService._deactivate_expired_campaigns(session)
         result = await session.execute(
             select(Campaign)
             .where(Campaign.is_active == True)
@@ -64,6 +106,8 @@ class CampaignService:
         Returns:
             List of Campaign objects
         """
+        await CampaignService._deactivate_expired_campaigns(session)
+
         # TODO: Add organizer_id to Campaign model for proper filtering
         # For MVP, return all campaigns (organizers can see all)
         result = await session.execute(
@@ -79,6 +123,7 @@ class CampaignService:
         min_score: int,
         max_score: int,
         ttl_minutes: int,
+        campaign_deadline_at: datetime,
         is_expert_anon: bool,
         p2p_reviews_required: int,
         voting_type: str | None,
@@ -107,6 +152,7 @@ class CampaignService:
             min_score=min_score,
             max_score=max_score,
             ttl_minutes=ttl_minutes,
+            campaign_deadline_at=campaign_deadline_at,
             is_expert_anon=is_expert_anon,
             p2p_reviews_required=p2p_reviews_required,
             voting_type=voting_type,
@@ -192,6 +238,7 @@ async def create_campaign(
     min_score: int,
     max_score: int,
     ttl_minutes: int,
+    campaign_deadline_at: datetime,
     is_expert_anon: bool,
     p2p_reviews_required: int,
     voting_type: str | None,
@@ -201,7 +248,7 @@ async def create_campaign(
     """Create a new campaign."""
     return await CampaignService.create_campaign(
         title, campaign_type, min_score, max_score,
-        ttl_minutes, is_expert_anon, p2p_reviews_required,
+        ttl_minutes, campaign_deadline_at, is_expert_anon, p2p_reviews_required,
         voting_type, organizer_id, session
     )
 

@@ -77,6 +77,19 @@ async def _ensure_schema(conn) -> None:
             "ADD COLUMN IF NOT EXISTS voting_type VARCHAR(20)"
         )
     )
+    await conn.execute(
+        text(
+            "ALTER TABLE campaigns "
+            "ADD COLUMN IF NOT EXISTS campaign_deadline_at TIMESTAMPTZ"
+        )
+    )
+    await conn.execute(
+        text(
+            "UPDATE campaigns "
+            "SET campaign_deadline_at = created_at + INTERVAL '7 days' "
+            "WHERE campaign_deadline_at IS NULL"
+        )
+    )
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

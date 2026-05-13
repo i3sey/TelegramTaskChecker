@@ -218,7 +218,13 @@ async def _acquire_submission_for_review(
 
 
 def _campaign_deadline(campaign) -> datetime | None:
-    """Calculate campaign deadline from created_at and ttl_minutes."""
+    """Calculate campaign submission deadline."""
+    deadline = getattr(campaign, "campaign_deadline_at", None)
+    if deadline is not None:
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=timezone.utc)
+        return deadline
+
     created_at = getattr(campaign, "created_at", None)
     ttl_minutes = getattr(campaign, "ttl_minutes", None)
     if not created_at or ttl_minutes is None:

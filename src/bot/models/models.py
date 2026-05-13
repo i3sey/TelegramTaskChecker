@@ -130,6 +130,10 @@ class Campaign(Base):
     min_score: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     max_score: Mapped[int] = mapped_column(Integer, default=100, nullable=False)
     ttl_minutes: Mapped[int] = mapped_column(Integer, default=1440, nullable=False)
+    campaign_deadline_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     is_expert_anon: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     p2p_reviews_required: Mapped[int] = mapped_column(
         Integer,

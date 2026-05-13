@@ -28,6 +28,8 @@ from src.bot.keyboards import (
     build_comment_decision_keyboard,
     build_review_confirmation_keyboard,
     build_post_review_keyboard,
+    get_keyboard_for_role,
+    get_keyboard_for_expert_with_return,
 )
 from src.bot.ui import format_ttl_minutes
 
@@ -57,6 +59,24 @@ class ExpertReviewState(StatesGroup):
     reviewing_submission = State()
     waiting_for_score = State()
     waiting_for_comment = State()
+
+
+def build_quick_score_keyboard() -> InlineKeyboardMarkup:
+    """Inline buttons for common score values."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="0", callback_data="score_quick_0"),
+                InlineKeyboardButton(text="20", callback_data="score_quick_20"),
+                InlineKeyboardButton(text="40", callback_data="score_quick_40"),
+            ],
+            [
+                InlineKeyboardButton(text="60", callback_data="score_quick_60"),
+                InlineKeyboardButton(text="80", callback_data="score_quick_80"),
+                InlineKeyboardButton(text="100", callback_data="score_quick_100"),
+            ],
+        ]
+    )
 
 
 def get_score_keyboard(min_score: int, max_score: int) -> InlineKeyboardMarkup:
@@ -149,9 +169,20 @@ async def send_submission_to_expert(
             parse_mode="HTML",
         )
 
+    reviewer_role = UserRole.EXPERT
+    async with session_scope() as session:
+        reviewer = await get_user(tg_id=message.from_user.id, session=session)
+        if reviewer:
+            reviewer_role = reviewer.role
+
     await message.answer(
         "⬇️ Введите оценку числом.\n"
         f"Допустимый диапазон: {campaign.min_score}–{campaign.max_score}.",
+        reply_markup=get_keyboard_for_expert_with_return(reviewer_role),
+    )
+    await message.answer(
+        "Выберите оценку кнопкой или введите вручную:",
+        reply_markup=build_quick_score_keyboard(),
     )
 
 
@@ -204,11 +235,28 @@ async def cmd_queue(message: types.Message) -> None:
 
     # Also show Redis-locked submissions
     locked = await queue_service.get_all_locked_submissions()
+    current_submission_id = await queue_service.get_expert_current_submission(message.from_user.id)
+    current_ttl = None
+    if current_submission_id is not None:
+        ttl_seconds = await queue_service.get_submission_ttl(current_submission_id)
+        if ttl_seconds > 0:
+            minutes = ttl_seconds // 60
+            seconds = ttl_seconds % 60
+            current_ttl = f"{minutes}м {seconds}с"
+
+    current_block = ""
+    if current_submission_id is not None:
+        ttl_text = current_ttl or "истек или недоступен"
+        current_block = (
+            f"\n🧷 Текущая работа: <code>{current_submission_id}</code>\n"
+            f"⏳ Осталось на проверку: <b>{ttl_text}</b>\n"
+        )
 
     await message.answer(
         f"📋 <b>Очередь проверки</b>\n\n"
         f"📦 Работ в очереди: <b>{count}</b>\n"
-        f"🔒 На проверке сейчас: <b>{len(locked)}</b>\n\n"
+        f"🔒 На проверке сейчас: <b>{len(locked)}</b>\n"
+        f"{current_block}\n"
         "Используйте /take для получения следующей работы.",
         parse_mode="HTML",
     )
@@ -316,9 +364,14 @@ async def cmd_return(message: types.Message, state: FSMContext) -> None:
 
     await state.clear()
 
+    async with session_scope() as session:
+        user = await get_user(tg_id=tg_id, session=session)
+        reply_markup = get_keyboard_for_role(user.role) if user else None
+
     await message.answer(
         f"✅ Работа (ID: <code>{submission_id}</code>) возвращена в очередь.",
         parse_mode="HTML",
+        reply_markup=reply_markup,
     )
 
 
@@ -415,6 +468,50 @@ async def process_score_input(message: types.Message, state: FSMContext) -> None
     )
 
 
+@router.callback_query(F.data.startswith("score_quick_"))
+async def process_quick_score(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Process quick score selection from inline buttons."""
+    if not callback.message or not isinstance(callback.message, types.Message):
+        return
+
+    score_value = callback.data.removeprefix("score_quick_")
+    if not score_value.isdigit():
+        await callback.answer("Некорректная оценка", show_alert=True)
+        return
+
+    data = await state.get_data()
+    submission_id = data.get("submission_id")
+    campaign_id = data.get("campaign_id")
+
+    if not submission_id or not campaign_id:
+        await callback.answer("Сначала возьмите работу на проверку", show_alert=True)
+        return
+
+    score = int(score_value)
+    async with session_scope() as session:
+        campaign = await get_campaign(campaign_id, session)
+        if not campaign:
+            await callback.answer("Кампания не найдена", show_alert=True)
+            return
+        if score < campaign.min_score or score > campaign.max_score:
+            await callback.answer(
+                f"Диапазон: {campaign.min_score}-{campaign.max_score}",
+                show_alert=True,
+            )
+            return
+
+    await state.update_data(score=score)
+    await state.set_state(ExpertReviewState.waiting_for_comment)
+    await callback.answer(f"Оценка {score} сохранена")
+    await callback.message.answer(
+        f"📝 <b>Оценка сохранена: {score}</b>\n\n"
+        "Теперь отправьте текстовый комментарий к работе.\n"
+        "Если комментарий не нужен, нажмите кнопку ниже.",
+        parse_mode="HTML",
+        reply_markup=build_comment_decision_keyboard(),
+    )
+
+
 @router.callback_query(F.data == "confirm_submit")
 async def handle_confirm_callback(callback: types.CallbackQuery, state: FSMContext, bot: Bot) -> None:
     """Handle confirm button callback - save review."""
@@ -492,6 +589,10 @@ async def handle_confirm_callback(callback: types.CallbackQuery, state: FSMConte
 
     await state.clear()
 
+    async with session_scope() as session:
+        user = await get_user(tg_id=tg_id, session=session)
+        reply_markup = get_keyboard_for_role(user.role) if user else None
+
     await callback.answer("Рецензия сохранена!")
     await message.answer(
         f"✅ <b>Рецензия сохранена!</b>\n\n"
@@ -502,6 +603,8 @@ async def handle_confirm_callback(callback: types.CallbackQuery, state: FSMConte
         parse_mode="HTML",
         reply_markup=build_post_review_keyboard(),
     )
+    if reply_markup:
+        await message.answer("Меню эксперта обновлено.", reply_markup=reply_markup)
 
 
 @router.callback_query(F.data == "cancel_review")
@@ -521,11 +624,17 @@ async def handle_cancel_callback(callback: types.CallbackQuery, state: FSMContex
                 session
             )
     await state.clear()
+
+    async with session_scope() as session:
+        user = await get_user(tg_id=callback.from_user.id, session=session)
+        reply_markup = get_keyboard_for_role(user.role) if user else None
+
     await callback.answer("Работа возвращена в очередь")
     await callback.message.answer(
         "↩️ <b>Работа возвращена в очередь.</b>\n\n"
         "Вы можете взять другую работу командой /take.",
         parse_mode="HTML",
+        reply_markup=reply_markup,
     )
 
 

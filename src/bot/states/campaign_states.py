@@ -11,6 +11,7 @@ class CampaignCreationStates(StatesGroup):
     waiting_for_min_score = State()
     waiting_for_max_score = State()
     waiting_for_ttl = State()
+    waiting_for_campaign_deadline_days = State()
     waiting_for_anonymous = State()
 
 

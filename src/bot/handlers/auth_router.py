@@ -26,7 +26,6 @@ from src.bot.keyboards import (
     BTN_PROFILE,
     BTN_HELP,
     BTN_ROLE,
-    build_post_registration_keyboard,
 )
 from src.bot.ui import (
     role_label,
@@ -346,11 +345,6 @@ async def process_study_group(message: types.Message, state: FSMContext):
             parse_mode="HTML",
             reply_markup=get_keyboard_for_role(UserRole.STUDENT),
         )
-        await message.answer(
-            "Быстрые действия:",
-            reply_markup=build_post_registration_keyboard(),
-        )
-
         if invite_ok:
             from src.bot.handlers.campaign_router import cmd_submit
 
@@ -506,6 +500,9 @@ async def process_role_change(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         message_text,
         parse_mode="HTML",
+    )
+    await callback.message.answer(
+        "Главное меню обновлено.",
         reply_markup=get_keyboard_for_role(user.role),
     )
     await callback.answer()

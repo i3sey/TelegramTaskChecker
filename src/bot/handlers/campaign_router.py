@@ -1,11 +1,13 @@
 """Campaign management router for organizers."""
+from datetime import datetime, timedelta, timezone
 from aiogram import Router, types, F
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from sqlalchemy import func, select
 
 from src.db.engine import session_scope
-from src.db.models import UserRole, CampaignType
+from src.db.models import UserRole, CampaignType, Campaign, Submission, Review, SubmissionStatus
 from src.bot.services.user_service import get_user
 from src.bot.services.campaign_service import (
     get_campaign,
@@ -21,7 +23,6 @@ from src.bot.keyboards import (
     BTN_SUBMIT,
     BTN_MY_SUBMISSIONS,
     BTN_CREATE_CAMPAIGN,
-    BTN_DEFAULT,
     BTN_HOURS_12,
     BTN_HOURS_24,
     BTN_HOURS_48,
@@ -77,9 +78,6 @@ def _parse_choice(text: str | None, *, default: int | None = None, mapping: dict
         return None
 
     normalized = text.strip()
-    if normalized == BTN_DEFAULT and default is not None:
-        return default
-
     if normalized.isdigit():
         return int(normalized)
 
@@ -134,14 +132,13 @@ def _build_inline_keyboard(rows: list[list[tuple[str, str]]]):
 def _build_min_score_keyboard():
     return _build_inline_keyboard([
         [("0", "cam_min_0"), ("50", "cam_min_50"), ("100", "cam_min_100")],
-        [("200", "cam_min_200"), (BTN_DEFAULT, "cam_min_default")],
+        [("200", "cam_min_200")],
     ])
 
 
 def _build_max_score_keyboard():
     return _build_inline_keyboard([
         [("100", "cam_max_100"), ("200", "cam_max_200"), ("500", "cam_max_500")],
-        [(BTN_DEFAULT, "cam_max_default")],
     ])
 
 
@@ -149,8 +146,102 @@ def _build_ttl_keyboard():
     return _build_inline_keyboard([
         [("12 часов", "cam_ttl_720"), ("24 часа", "cam_ttl_1440")],
         [("48 часов", "cam_ttl_2880"), ("72 часа", "cam_ttl_4320")],
-        [(BTN_DEFAULT, "cam_ttl_default")],
     ])
+
+
+def _build_campaign_deadline_keyboard():
+    return _build_inline_keyboard([
+        [("1 день", "cam_deadline_days_1"), ("3 дня", "cam_deadline_days_3")],
+        [("7 дней", "cam_deadline_days_7"), ("14 дней", "cam_deadline_days_14")],
+    ])
+
+
+def _campaign_deadline(campaign: Campaign) -> datetime | None:
+    deadline = getattr(campaign, "campaign_deadline_at", None)
+    if deadline is not None:
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=timezone.utc)
+        return deadline
+
+    created_at = getattr(campaign, "created_at", None)
+    ttl_minutes = getattr(campaign, "ttl_minutes", None)
+    if not created_at or ttl_minutes is None:
+        return None
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    return created_at + timedelta(minutes=ttl_minutes)
+
+
+def _campaign_deadline_from_days(days: int) -> datetime:
+    return datetime.now(timezone.utc) + timedelta(days=days)
+
+
+def _format_time_left(deadline: datetime | None) -> str:
+    if not deadline:
+        return "не задан"
+    now = datetime.now(timezone.utc)
+    if deadline <= now:
+        return "истек"
+    delta = deadline - now
+    total_hours = int(delta.total_seconds() // 3600)
+    days, hours = divmod(total_hours, 24)
+    if days > 0:
+        return f"{days} д. {hours} ч."
+    minutes = int((delta.total_seconds() % 3600) // 60)
+    return f"{hours} ч. {minutes} мин."
+
+
+async def _campaign_stats(campaign_id: int, session) -> dict[str, float | int]:
+    submissions_result = await session.execute(
+        select(func.count(Submission.id)).where(Submission.campaign_id == campaign_id)
+    )
+    total_submissions = int(submissions_result.scalar_one() or 0)
+
+    reviewed_result = await session.execute(
+        select(func.count(Submission.id)).where(
+            Submission.campaign_id == campaign_id,
+            Submission.status == SubmissionStatus.REVIEWED,
+        )
+    )
+    reviewed_submissions = int(reviewed_result.scalar_one() or 0)
+
+    reviews_result = await session.execute(
+        select(func.count(Review.id))
+        .join(Submission, Review.submission_id == Submission.id)
+        .where(Submission.campaign_id == campaign_id)
+    )
+    total_reviews = int(reviews_result.scalar_one() or 0)
+
+    avg_result = await session.execute(
+        select(func.avg(Review.score))
+        .join(Submission, Review.submission_id == Submission.id)
+        .where(Submission.campaign_id == campaign_id)
+    )
+    avg_score_raw = avg_result.scalar_one()
+    avg_score = float(avg_score_raw) if avg_score_raw is not None else 0.0
+
+    return {
+        "total_submissions": total_submissions,
+        "reviewed_submissions": reviewed_submissions,
+        "total_reviews": total_reviews,
+        "avg_score": avg_score,
+    }
+
+
+def _finish_campaigns_keyboard(campaigns: list[Campaign]) -> types.InlineKeyboardMarkup | None:
+    active = [campaign for campaign in campaigns if campaign.is_active]
+    if not active:
+        return None
+
+    builder = InlineKeyboardBuilder()
+    for campaign in active:
+        builder.row(
+            types.InlineKeyboardButton(
+                text=f"✅ Завершить: {campaign.title[:40]}",
+                callback_data=f"finish_campaign_{campaign.id}",
+            )
+        )
+    return builder.as_markup()
 
 
 def _build_p2p_reviews_keyboard():
@@ -411,7 +502,10 @@ async def process_campaign_min_score_callback(callback: types.CallbackQuery, sta
         return
 
     value = callback.data.removeprefix("cam_min_")
-    min_score = 0 if value == "default" else int(value)
+    if not value.isdigit():
+        await callback.answer("Некорректное значение", show_alert=True)
+        return
+    min_score = int(value)
     await state.update_data(min_score=min_score)
     logger.debug(f"Min score selected: {min_score}")
 
@@ -430,7 +524,6 @@ async def process_min_score(message: types.Message, state: FSMContext):
     """Process minimum score input."""
     min_score = _parse_choice(
         message.text,
-        default=0,
         mapping={BTN_SCORE_0: 0, BTN_SCORE_50: 50, BTN_SCORE_100: 100, BTN_SCORE_200: 200},
     )
     if min_score is None or min_score < 0:
@@ -459,7 +552,10 @@ async def process_campaign_max_score_callback(callback: types.CallbackQuery, sta
         return
 
     value = callback.data.removeprefix("cam_max_")
-    max_score = 100 if value == "default" else int(value)
+    if not value.isdigit():
+        await callback.answer("Некорректное значение", show_alert=True)
+        return
+    max_score = int(value)
 
     data = await state.get_data()
     min_score = data.get("min_score", 0)
@@ -488,7 +584,6 @@ async def process_max_score(message: types.Message, state: FSMContext):
     """Process maximum score input."""
     max_score = _parse_choice(
         message.text,
-        default=100,
         mapping={BTN_SCORE_100: 100, BTN_SCORE_200: 200, BTN_SCORE_500: 500},
     )
     if max_score is None or max_score < 0:
@@ -526,17 +621,20 @@ async def process_campaign_ttl_callback(callback: types.CallbackQuery, state: FS
         return
 
     value = callback.data.removeprefix("cam_ttl_")
-    ttl_minutes = 1440 if value == "default" else int(value)
+    if not value.isdigit():
+        await callback.answer("Некорректное значение", show_alert=True)
+        return
+    ttl_minutes = int(value)
     await state.update_data(ttl_minutes=ttl_minutes)
     logger.debug(f"TTL selected: {ttl_minutes}")
 
     await callback.message.edit_text(
-        "🔒 <b>Сделать рецензии анонимными?</b>\n"
-        "Если выбрать «Да», автор не увидит имя проверяющего.",
-        reply_markup=_build_anonymous_keyboard(),
+        "📅 <b>Через сколько дней закрыть сдачу работ?</b>\n"
+        "Можно выбрать кнопку или ввести число дней вручную.",
+        reply_markup=_build_campaign_deadline_keyboard(),
         parse_mode="HTML",
     )
-    await state.set_state(CampaignCreationStates.waiting_for_anonymous)
+    await state.set_state(CampaignCreationStates.waiting_for_campaign_deadline_days)
     await callback.answer()
 
 
@@ -545,7 +643,6 @@ async def process_ttl(message: types.Message, state: FSMContext):
     """Process TTL input."""
     ttl_minutes = _parse_choice(
         message.text,
-        default=1440,
         mapping={BTN_HOURS_12: 720, BTN_HOURS_24: 1440, BTN_HOURS_48: 2880, BTN_HOURS_72: 4320},
     )
     if ttl_minutes is None or ttl_minutes <= 0:
@@ -559,7 +656,54 @@ async def process_ttl(message: types.Message, state: FSMContext):
     logger.debug(f"TTL entered: {ttl_minutes}")
 
     await message.answer(
-        "🔒 <b>Шаг 5/5. Сделать рецензии анонимными?</b>\n"
+        "📅 <b>Через сколько дней закрыть сдачу работ?</b>\n"
+        "Можно выбрать кнопку или ввести число дней вручную.",
+        reply_markup=_build_campaign_deadline_keyboard(),
+        parse_mode="HTML",
+    )
+    await state.set_state(CampaignCreationStates.waiting_for_campaign_deadline_days)
+
+
+@router.callback_query(StateFilter(CampaignCreationStates.waiting_for_campaign_deadline_days))
+async def process_campaign_deadline_callback(callback: types.CallbackQuery, state: FSMContext):
+    if not callback.data or not callback.data.startswith("cam_deadline_days_"):
+        await callback.answer()
+        return
+
+    value = callback.data.removeprefix("cam_deadline_days_")
+    if not value.isdigit() or int(value) <= 0:
+        await callback.answer("Введите число дней > 0", show_alert=True)
+        return
+
+    days = int(value)
+    await state.update_data(campaign_deadline_days=days)
+    logger.debug(f"Campaign deadline days selected: {days}")
+
+    await callback.message.edit_text(
+        "🔒 <b>Сделать рецензии анонимными?</b>\n"
+        "Если выбрать «Да», автор не увидит имя проверяющего.",
+        reply_markup=_build_anonymous_keyboard(),
+        parse_mode="HTML",
+    )
+    await state.set_state(CampaignCreationStates.waiting_for_anonymous)
+    await callback.answer()
+
+
+@router.message(StateFilter(CampaignCreationStates.waiting_for_campaign_deadline_days))
+async def process_campaign_deadline_message(message: types.Message, state: FSMContext):
+    days = _parse_choice(message.text)
+    if days is None or days <= 0:
+        await message.answer(
+            "❌ Введите целое число дней больше 0 или выберите кнопку.",
+            reply_markup=_build_campaign_deadline_keyboard(),
+        )
+        return
+
+    await state.update_data(campaign_deadline_days=days)
+    logger.debug(f"Campaign deadline days entered: {days}")
+
+    await message.answer(
+        "🔒 <b>Сделать рецензии анонимными?</b>\n"
         "Если выбрать «Да», автор не увидит имя проверяющего.",
         reply_markup=_build_anonymous_keyboard(),
         parse_mode="HTML",
@@ -578,6 +722,8 @@ async def process_campaign_anonymous_callback(callback: types.CallbackQuery, sta
 
     data = await state.get_data()
     tg_id = callback.from_user.id
+    campaign_deadline_days = int(data.get("campaign_deadline_days", 7))
+    campaign_deadline_at = _campaign_deadline_from_days(campaign_deadline_days)
 
     async with session_scope() as session:
         try:
@@ -587,6 +733,7 @@ async def process_campaign_anonymous_callback(callback: types.CallbackQuery, sta
                 min_score=data["min_score"],
                 max_score=data["max_score"],
                 ttl_minutes=data["ttl_minutes"],
+                campaign_deadline_at=campaign_deadline_at,
                 is_expert_anon=is_anon,
                 p2p_reviews_required=data.get("p2p_reviews_required", 3),
                 voting_type=data.get("voting_type"),
@@ -617,7 +764,8 @@ async def process_campaign_anonymous_callback(callback: types.CallbackQuery, sta
                 f"📋 <b>{campaign.title}</b>\n"
                 f"📊 Тип: {get_campaign_type_display(CampaignType(data['campaign_type']))}\n"
                 f"{score_line}"
-                f"⏱ Время: {format_ttl_minutes(campaign.ttl_minutes)}\n"
+                f"⏱ Дедлайн проверки эксперта: {format_ttl_minutes(campaign.ttl_minutes)}\n"
+                f"📅 Дедлайн сдачи работ: {campaign_deadline_at.astimezone().strftime('%d.%m.%Y %H:%M')}\n"
                 f"🔒 Анонимность: {'Да' if is_anon else 'Нет'}"
                 f"{extra_lines}"
                 f"{_format_invite_block(bot_username, student_code, expert_code)}",
@@ -646,6 +794,8 @@ async def process_anonymous_message(message: types.Message, state: FSMContext):
 
     data = await state.get_data()
     tg_id = message.from_user.id
+    campaign_deadline_days = int(data.get("campaign_deadline_days", 7))
+    campaign_deadline_at = _campaign_deadline_from_days(campaign_deadline_days)
 
     async with session_scope() as session:
         try:
@@ -655,6 +805,7 @@ async def process_anonymous_message(message: types.Message, state: FSMContext):
                 min_score=data["min_score"],
                 max_score=data["max_score"],
                 ttl_minutes=data["ttl_minutes"],
+                campaign_deadline_at=campaign_deadline_at,
                 is_expert_anon=is_anon,
                 p2p_reviews_required=data.get("p2p_reviews_required", 3),
                 voting_type=data.get("voting_type"),
@@ -683,7 +834,8 @@ async def process_anonymous_message(message: types.Message, state: FSMContext):
                 f"📋 <b>{campaign.title}</b>\n"
                 f"📊 Тип: {get_campaign_type_display(CampaignType(data['campaign_type']))}\n"
                 f"{score_line}"
-                f"⏱ Время на проверку: {format_ttl_minutes(campaign.ttl_minutes)}\n"
+                f"⏱ Дедлайн проверки эксперта: {format_ttl_minutes(campaign.ttl_minutes)}\n"
+                f"📅 Дедлайн сдачи работ: {campaign_deadline_at.astimezone().strftime('%d.%m.%Y %H:%M')}\n"
                 f"🔒 Анонимность: {'Да' if is_anon else 'Нет'}"
                 f"{extra_lines}"
                 f"{_format_invite_block(bot_username, student_code, expert_code)}",
@@ -718,6 +870,8 @@ async def cmd_campaigns(message: types.Message):
 
         text = "📋 <b>Активные кампании:</b>\n\n"
         for i, campaign in enumerate(campaigns, 1):
+            deadline = _campaign_deadline(campaign)
+            deadline_text = deadline.strftime('%d.%m.%Y %H:%M') if deadline else "не задан"
             text += f"{i}. <b>{campaign.title}</b>\n"
             text += f"   📊 Тип: {get_campaign_type_display(campaign.type)}\n"
             if campaign.type == CampaignType.VOTING and campaign.voting_type == "like":
@@ -728,7 +882,8 @@ async def cmd_campaigns(message: types.Message):
                 text += f"   👥 Проверок на участника: {campaign.p2p_reviews_required}\n"
             if campaign.type == CampaignType.VOTING:
                 text += f"   🗳 Тип голосования: {voting_type_label(campaign.voting_type)}\n"
-            text += f"   ⏱ Время: {format_ttl_minutes(campaign.ttl_minutes)}\n\n"
+            text += f"   ⏱ Дедлайн проверки эксперта: {format_ttl_minutes(campaign.ttl_minutes)}\n"
+            text += f"   📅 Дедлайн сдачи: {deadline_text} ({_format_time_left(deadline)})\n\n"
 
         await message.answer(text, parse_mode="HTML")
 
@@ -768,9 +923,6 @@ async def cmd_my_campaigns(message: types.Message):
         submission_counts = {}
         campaign_ids = [campaign.id for campaign in campaigns]
         if campaign_ids:
-            from sqlalchemy import func, select
-            from src.db.models import Submission
-
             result = await session.execute(
                 select(Submission.campaign_id, func.count(Submission.id))
                 .where(Submission.campaign_id.in_(campaign_ids))
@@ -781,8 +933,11 @@ async def cmd_my_campaigns(message: types.Message):
             }
 
         text = "📋 <b>Ваши кампании:</b>\n\n"
+        completed_campaign_stats: list[str] = []
         for i, campaign in enumerate(campaigns, 1):
-            status = "🟢 Активна" if campaign.is_active else "🔴 Неактивна"
+            status = "🟢 Активна" if campaign.is_active else "🔴 Завершена"
+            deadline = _campaign_deadline(campaign)
+            deadline_text = deadline.strftime('%d.%m.%Y %H:%M') if deadline else "не задан"
             text += f"{i}. <b>{campaign.title}</b> {status}\n"
             text += f"   📊 Тип: {get_campaign_type_display(campaign.type)}\n"
             if campaign.type == CampaignType.VOTING and campaign.voting_type == "like":
@@ -793,9 +948,121 @@ async def cmd_my_campaigns(message: types.Message):
                 text += f"   👥 Проверок на участника: {campaign.p2p_reviews_required}\n"
             if campaign.type == CampaignType.VOTING:
                 text += f"   🗳 Тип голосования: {voting_type_label(campaign.voting_type)}\n"
+            text += f"   ⏱ Дедлайн проверки эксперта: {format_ttl_minutes(campaign.ttl_minutes)}\n"
+            text += f"   📅 Дедлайн сдачи: {deadline_text} ({_format_time_left(deadline)})\n"
             text += f"   📝 Сдано: {submission_counts.get(campaign.id, 0)} работ\n\n"
 
-        await message.answer(text, parse_mode="HTML")
+            if not campaign.is_active:
+                stats = await _campaign_stats(campaign.id, session)
+                completed_campaign_stats.append(
+                    f"• <b>{campaign.title}</b>: "
+                    f"работ {stats['total_submissions']}, "
+                    f"проверено {stats['reviewed_submissions']}, "
+                    f"средний балл {stats['avg_score']:.1f}"
+                )
+
+        if completed_campaign_stats:
+            text += "📌 <b>Статистика завершённых кампаний:</b>\n"
+            text += "\n".join(completed_campaign_stats)
+
+        await message.answer(
+            text,
+            parse_mode="HTML",
+            reply_markup=_finish_campaigns_keyboard(campaigns),
+        )
+
+
+@router.callback_query(F.data == "menu_campaigns")
+async def menu_campaigns(callback: types.CallbackQuery) -> None:
+    if not callback.message:
+        await callback.answer("❌ Ошибка: не удалось получить сообщение", show_alert=True)
+        return
+    await cmd_campaigns(callback.message)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "menu_my_submissions")
+async def menu_my_submissions(callback: types.CallbackQuery) -> None:
+    if not callback.message:
+        await callback.answer("❌ Ошибка: не удалось получить сообщение", show_alert=True)
+        return
+    await cmd_my_submissions(callback.message)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "org_my_campaigns")
+async def menu_org_my_campaigns(callback: types.CallbackQuery) -> None:
+    if not callback.message:
+        await callback.answer("❌ Ошибка: не удалось получить сообщение", show_alert=True)
+        return
+    await cmd_my_campaigns(callback.message)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "org_create_campaign")
+async def menu_org_create_campaign(callback: types.CallbackQuery, state: FSMContext) -> None:
+    if not callback.message:
+        await callback.answer("❌ Ошибка: не удалось получить сообщение", show_alert=True)
+        return
+    await cmd_create_campaign(callback.message, state)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("finish_campaign_"))
+async def finish_campaign(callback: types.CallbackQuery) -> None:
+    if not callback.message:
+        await callback.answer("❌ Ошибка: не удалось получить сообщение", show_alert=True)
+        return
+
+    campaign_id_text = callback.data.removeprefix("finish_campaign_")
+    if not campaign_id_text.isdigit():
+        await callback.answer("Некорректный ID кампании", show_alert=True)
+        return
+
+    campaign_id = int(campaign_id_text)
+    tg_id = callback.from_user.id
+
+    async with session_scope() as session:
+        user = await get_user(tg_id=tg_id, session=session)
+        if not user or user.role not in (UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER):
+            await callback.answer("Доступно только организаторам", show_alert=True)
+            return
+
+        campaign = await get_campaign(campaign_id, session)
+        if not campaign:
+            await callback.answer("Кампания не найдена", show_alert=True)
+            return
+
+        campaign_title = campaign.title
+
+        if not campaign.is_active:
+            stats = await _campaign_stats(campaign_id, session)
+            await callback.answer("Кампания уже завершена", show_alert=True)
+            await callback.message.answer(
+                "ℹ️ <b>Кампания уже завершена.</b>\n\n"
+                f"📋 {campaign_title}\n"
+                f"📝 Работ: <b>{stats['total_submissions']}</b>\n"
+                f"✅ Проверено работ: <b>{stats['reviewed_submissions']}</b>\n"
+                f"💬 Всего рецензий: <b>{stats['total_reviews']}</b>\n"
+                f"⭐ Средний балл: <b>{stats['avg_score']:.1f}</b>",
+                parse_mode="HTML",
+            )
+            return
+
+        campaign.is_active = False
+        await session.flush()
+        stats = await _campaign_stats(campaign_id, session)
+
+    await callback.answer("Кампания завершена")
+    await callback.message.answer(
+        "✅ <b>Кампания завершена организатором.</b>\n\n"
+        f"📋 {campaign_title}\n"
+        f"📝 Работ: <b>{stats['total_submissions']}</b>\n"
+        f"✅ Проверено работ: <b>{stats['reviewed_submissions']}</b>\n"
+        f"💬 Всего рецензий: <b>{stats['total_reviews']}</b>\n"
+        f"⭐ Средний балл: <b>{stats['avg_score']:.1f}</b>",
+        parse_mode="HTML",
+    )
 
 
 # Reply-keyboard handlers (buttons under input)
@@ -995,8 +1262,17 @@ async def process_submission_file(message: types.Message, state: FSMContext):
                 f"📌 Статус: 🟡 <b>Ожидает проверки</b>\n"
                 "Что дальше: дождитесь, когда работу возьмут на проверку.",
                 parse_mode="HTML",
-                reply_markup=build_post_submission_keyboard(),
             )
+            
+            # Get user role for keyboard
+            from src.db.models import UserRole
+            from src.bot.services.user_service import get_user
+            user = await get_user(tg_id=tg_id, session=session)
+            if user:
+                await message.answer(
+                    "Главное меню:",
+                    reply_markup=get_keyboard_for_role(user.role),
+                )
 
         except Exception as e:
             logger.error(f"Failed to create submission: {e}")
