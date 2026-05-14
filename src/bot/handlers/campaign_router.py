@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 
 from src.db.engine import session_scope
 from src.db.models import UserRole, CampaignType, Campaign, Submission, Review, SubmissionStatus
+from src.db.models import UserRole, CampaignType, Campaign, Submission, Review, SubmissionStatus, InviteCode
 from src.bot.services.user_service import get_user
 from src.bot.services.campaign_service import (
     get_campaign,
@@ -965,6 +966,28 @@ async def cmd_my_campaigns(message: types.Message):
         if completed_campaign_stats:
             text += "📌 <b>Статистика завершённых кампаний:</b>\n"
             text += "\n".join(completed_campaign_stats)
+        # Get invites for each campaign
+        invites_by_campaign = {}
+        if campaign_ids:
+            result = await session.execute(
+                select(InviteCode).where(InviteCode.campaign_id.in_(campaign_ids), InviteCode.is_active == True)
+            )
+            invites = result.scalars().all()
+            for invite in invites:
+                if invite.campaign_id not in invites_by_campaign:
+                    invites_by_campaign[invite.campaign_id] = []
+                invites_by_campaign[invite.campaign_id].append(invite)
+        
+        # Add invites to text
+        if invites_by_campaign:
+            text += "\n🔗 <b>Инвайты кампаний:</b>\n"
+            for campaign in campaigns:
+                if campaign.id in invites_by_campaign:
+                    text += f"\n<b>{campaign.title}</b>:\n"
+                    for invite in invites_by_campaign[campaign.id]:
+                        used_text = f" ({invite.uses}" + (f"/{invite.max_uses}" if invite.max_uses else "") + ")"
+                        text += f"   <code>{invite.code}</code>{used_text}\n"
+
 
         await message.answer(
             text,

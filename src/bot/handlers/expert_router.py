@@ -648,8 +648,8 @@ async def process_comment(message: types.Message, state: FSMContext) -> None:
     if not message.text:
         await message.answer(
             "⚠️ Сейчас можно отправить только текстовый комментарий.\n"
-            "Если комментарий не нужен, нажмите кнопку ниже.",
-            reply_markup=build_comment_decision_keyboard(),
+            "Либо напишите комментарий, либо пропустите его.",
+            reply_markup=build_comment_skip_keyboard(),
         )
         return
 
