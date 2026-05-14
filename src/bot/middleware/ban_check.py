@@ -2,9 +2,7 @@
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware
-from aiogram.dispatcher.flags import get_flag
-from aiogram.types import TelegramObject, User
-from aiogram.fsm.context import FSMContext
+from aiogram.types import TelegramObject
 
 from src.db.engine import session_scope
 from src.bot.services.user_service import get_user

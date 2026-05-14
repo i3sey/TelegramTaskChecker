@@ -5,7 +5,6 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Load environment variables
 env_path = Path(__file__).parent.parent.parent / ".env"
 load_dotenv(env_path)
 
@@ -70,7 +69,6 @@ def _get_redis_url() -> str:
     return f"redis://{host}:{port}/{db}"
 
 
-# Global configuration instance
 config = Config(
     DEBUG=os.getenv("DEBUG", "false").lower() in ("true", "1", "yes"),
     bot=BotConfig(

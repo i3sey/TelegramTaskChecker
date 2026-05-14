@@ -1,2 +1,3 @@
 # TelegramTaskChecker
-Telegram bot for various methods of checking student's tasks
+
+Telegram bot for managing task submission, review, and campaign workflows.

@@ -1,4 +1,4 @@
-"""Echo bot entry point."""
+"""Application entry point."""
 
 import asyncio
 from aiogram import Bot, Dispatcher, Router, types
@@ -16,7 +16,7 @@ from src.bot.handlers.expert_router import router as expert_router
 from src.bot.handlers.student_router import router as student_router
 from src.bot.handlers.organizer_router import router as organizer_router
 from src.bot.handlers.peer_router import router as peer_router
-from src.bot.middlewares.ban_check import BanCheckMiddleware
+from src.bot.middleware.ban_check import BanCheckMiddleware
 from src.bot.utils.logging import logger
 from src.bot.services.queue_service import queue_service
 from src.bot.services.expired_locks import start_expired_locks_scheduler
@@ -99,11 +99,8 @@ async def main() -> None:
     dp.include_router(fallback_router)
 
     logger.info("Starting bot...")
-    try:
-        await bot.delete_webhook(drop_pending_updates=True)
-        await dp.start_polling(bot)
-    finally:
-        await on_shutdown(bot)
+    await bot.delete_webhook(drop_pending_updates=True)
+    await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
