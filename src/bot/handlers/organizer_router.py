@@ -13,7 +13,6 @@ from src.bot.utils.logging import logger
 from src.bot.keyboards import (
     BTN_CREATE_CAMPAIGN,
     BTN_MY_CAMPAIGNS,
-    BTN_INVITES,
     BTN_MORE,
     BTN_SET_CRITERIA,
     BTN_VIEW_RESULTS,
@@ -207,11 +206,6 @@ async def btn_my_campaigns(message: types.Message) -> None:
     from src.bot.handlers.campaign_router import cmd_my_campaigns
 
     await cmd_my_campaigns(message)
-
-
-@router.message(F.text == BTN_INVITES)
-async def btn_invites(message: types.Message) -> None:
-    await cmd_invites(message)
 
 
 @router.message(F.text == BTN_SET_CRITERIA)

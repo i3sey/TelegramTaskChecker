@@ -28,7 +28,10 @@ BTN_EXPERT_STATS = "📈 Статистика"
 
 BTN_CREATE_CAMPAIGN = "🆕 Создать кампанию"
 BTN_MY_CAMPAIGNS = "📁 Мои кампании"
-BTN_INVITES = "🔗 Инвайты"
+BTN_SET_CRITERIA = "⚙️ Критерии"
+BTN_VIEW_RESULTS = "🔎 Результаты"
+BTN_EXPORT = "📤 Экспорт"
+BTN_ANALYTICS = "📊 Аналитика"
 BTN_MORE = "⋯ Ещё"
 BTN_SET_CRITERIA = "⚙️ Критерии"
 BTN_VIEW_RESULTS = "🔎 Результаты"
@@ -57,21 +60,17 @@ def _mk_markup(rows: list[list[str]]) -> ReplyKeyboardMarkup:
     )
 
 
-def _mk_bottom_row() -> list[str]:
-    """Return standard bottom row with Profile, Role, Help for all keyboards."""
-    return [BTN_PROFILE, BTN_ROLE, BTN_HELP]
 
 
 def build_campaign_title_keyboard() -> ReplyKeyboardMarkup:
-    return _mk_markup([_mk_bottom_row()])
+    return _mk_markup([[BTN_PROFILE, BTN_ROLE, BTN_HELP]])
 
 
 def build_campaign_min_score_keyboard() -> ReplyKeyboardMarkup:
     return _mk_markup(
         [
             [BTN_SCORE_0, BTN_SCORE_50, BTN_SCORE_100],
-            [BTN_SCORE_200],
-            _mk_bottom_row(),
+            [BTN_SCORE_200, BTN_PROFILE, BTN_ROLE, BTN_HELP],
         ]
     )
 
@@ -80,7 +79,7 @@ def build_campaign_max_score_keyboard() -> ReplyKeyboardMarkup:
     return _mk_markup(
         [
             [BTN_SCORE_100, BTN_SCORE_200, BTN_SCORE_500],
-            _mk_bottom_row(),
+            [BTN_PROFILE, BTN_ROLE, BTN_HELP],
         ]
     )
 
@@ -88,15 +87,14 @@ def build_campaign_max_score_keyboard() -> ReplyKeyboardMarkup:
 def build_campaign_ttl_keyboard() -> ReplyKeyboardMarkup:
     return _mk_markup(
         [
-            [BTN_HOURS_12, BTN_HOURS_24],
-            [BTN_HOURS_48, BTN_HOURS_72],
-            _mk_bottom_row(),
+            [BTN_HOURS_12, BTN_HOURS_24, BTN_HOURS_48, BTN_HOURS_72],
+            [BTN_PROFILE, BTN_ROLE, BTN_HELP],
         ]
     )
 
 
 def build_campaign_anonymous_keyboard() -> ReplyKeyboardMarkup:
-    return _mk_markup([[BTN_ANON_YES, BTN_ANON_NO], _mk_bottom_row()])
+    return _mk_markup([[BTN_ANON_YES, BTN_ANON_NO], [BTN_PROFILE, BTN_ROLE, BTN_HELP]])
 
 
 def build_organizer_more_keyboard() -> InlineKeyboardMarkup:
@@ -222,35 +220,32 @@ def get_keyboard_for_role(role: UserRole):
     if role == UserRole.STUDENT:
         return _mk_markup(
             [
-                [BTN_SUBMIT, BTN_MY_SUBMISSIONS],
-                [BTN_STATUS, BTN_CAMPAIGNS],
-                _mk_bottom_row(),
+                [BTN_SUBMIT, BTN_MY_SUBMISSIONS, BTN_STATUS],
+                [BTN_CAMPAIGNS, BTN_PROFILE, BTN_ROLE, BTN_HELP],
             ]
         )
     if role == UserRole.EXPERT:
         return _mk_markup(
             [
-                [BTN_TAKE, BTN_QUEUE],
-                [BTN_EXPERT_STATS],
-                _mk_bottom_row(),
+                [BTN_TAKE, BTN_QUEUE, BTN_EXPERT_STATS],
+                [BTN_PROFILE, BTN_ROLE, BTN_HELP],
             ]
         )
     if role == UserRole.EXPERT_ORGANIZER:
         return _mk_markup(
             [
-                [BTN_TAKE, BTN_QUEUE],
-                [BTN_EXPERT_STATS],
-                [BTN_CREATE_CAMPAIGN, BTN_MY_CAMPAIGNS],
-                [BTN_INVITES, BTN_MORE],
-                _mk_bottom_row(),
+                [BTN_TAKE, BTN_QUEUE, BTN_EXPERT_STATS],
+                [BTN_CREATE_CAMPAIGN, BTN_MY_CAMPAIGNS, BTN_EXPORT],
+                [BTN_VIEW_RESULTS, BTN_ANALYTICS, BTN_SET_CRITERIA],
+                [BTN_PROFILE, BTN_ROLE, BTN_HELP],
             ]
         )
     if role == UserRole.ORGANIZER:
         return _mk_markup(
             [
-                [BTN_CREATE_CAMPAIGN, BTN_MY_CAMPAIGNS],
-                [BTN_INVITES, BTN_MORE],
-                _mk_bottom_row(),
+                [BTN_CREATE_CAMPAIGN, BTN_MY_CAMPAIGNS, BTN_EXPORT],
+                [BTN_VIEW_RESULTS, BTN_ANALYTICS, BTN_SET_CRITERIA],
+                [BTN_PROFILE, BTN_ROLE, BTN_HELP],
             ]
         )
 
@@ -262,19 +257,17 @@ def get_keyboard_for_expert_with_return(role: UserRole) -> ReplyKeyboardMarkup:
     if role == UserRole.EXPERT:
         return _mk_markup(
             [
-                [BTN_TAKE, BTN_QUEUE],
-                [BTN_RETURN, BTN_EXPERT_STATS],
-                _mk_bottom_row(),
+                [BTN_TAKE, BTN_QUEUE, BTN_RETURN, BTN_EXPERT_STATS],
+                [BTN_PROFILE, BTN_ROLE, BTN_HELP],
             ]
         )
     if role == UserRole.EXPERT_ORGANIZER:
         return _mk_markup(
             [
-                [BTN_TAKE, BTN_QUEUE],
-                [BTN_RETURN, BTN_EXPERT_STATS],
-                [BTN_CREATE_CAMPAIGN, BTN_MY_CAMPAIGNS],
-                [BTN_INVITES, BTN_MORE],
-                _mk_bottom_row(),
+                [BTN_TAKE, BTN_QUEUE, BTN_RETURN, BTN_EXPERT_STATS],
+                [BTN_CREATE_CAMPAIGN, BTN_MY_CAMPAIGNS, BTN_EXPORT],
+                [BTN_VIEW_RESULTS, BTN_ANALYTICS, BTN_SET_CRITERIA],
+                [BTN_PROFILE, BTN_ROLE, BTN_HELP],
             ]
         )
     return get_keyboard_for_role(role)
