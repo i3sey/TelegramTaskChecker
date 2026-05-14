@@ -17,6 +17,7 @@ class ReviewService:
         comment_text: str | None,
         session: AsyncSession,
         voice_file_id: str | None = None,
+        ban_comment: str | None = None,
     ) -> Review:
         """
         Create a new review for a submission.
@@ -28,6 +29,7 @@ class ReviewService:
             comment_text: Optional text comment
             session: Database session
             voice_file_id: Optional voice file ID
+            ban_comment: Optional comment explaining why expert wants to ban student
 
         Returns:
             Created Review object
@@ -38,6 +40,7 @@ class ReviewService:
             score=score,
             comment_text=comment_text,
             voice_file_id=voice_file_id,
+            ban_comment=ban_comment,
         )
         session.add(review)
         await session.flush()
@@ -239,10 +242,11 @@ async def create_review(
     comment_text: str | None,
     session: AsyncSession,
     voice_file_id: str | None = None,
+    ban_comment: str | None = None,
 ) -> Review:
     """Create a new review."""
     return await ReviewService.create_review(
-        submission_id, reviewer_id, score, comment_text, session, voice_file_id
+        submission_id, reviewer_id, score, comment_text, session, voice_file_id, ban_comment
     )
 
 

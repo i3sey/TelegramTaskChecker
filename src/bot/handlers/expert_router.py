@@ -10,7 +10,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from src.config import config
 from src.db.engine import session_scope
 from src.db.models import UserRole, SubmissionStatus, User, Campaign
-from src.bot.services.user_service import get_user
+from src.bot.services.user_service import get_user, get_users_by_role
 from src.bot.services.submission_service import get_submission, update_submission_status
 from src.bot.services.review_service import create_review, count_pending_submissions, get_submission_pending
 from src.bot.services.campaign_service import get_campaign
@@ -26,6 +26,9 @@ from src.bot.keyboards import (
     BTN_MORE,
     build_expert_more_keyboard,
     build_comment_decision_keyboard,
+    build_comment_final_keyboard,
+    build_comment_skip_keyboard,
+    build_ban_comment_keyboard,
     build_review_confirmation_keyboard,
     build_post_review_keyboard,
     get_keyboard_for_role,
@@ -59,6 +62,7 @@ class ExpertReviewState(StatesGroup):
     reviewing_submission = State()
     waiting_for_score = State()
     waiting_for_comment = State()
+    waiting_for_ban_reason = State()
 
 
 def build_quick_score_keyboard() -> InlineKeyboardMarkup:
@@ -460,9 +464,9 @@ async def process_score_input(message: types.Message, state: FSMContext) -> None
     await state.update_data(score=score)
     await state.set_state(ExpertReviewState.waiting_for_comment)
     await message.answer(
-        f"📝 <b>Оценка сохранена: {score}</b>\n\n"
-        "Теперь отправьте текстовый комментарий к работе.\n"
-        "Если комментарий не нужен, нажмите кнопку ниже.",
+        f"✅ <b>Оценка сохранена: {score}</b>\n\n"
+        f"Диапазон оценок: {campaign.min_score}–{campaign.max_score}\n\n"
+        "Что дальше?",
         parse_mode="HTML",
         reply_markup=build_comment_decision_keyboard(),
     )
@@ -504,9 +508,9 @@ async def process_quick_score(callback: types.CallbackQuery, state: FSMContext) 
     await state.set_state(ExpertReviewState.waiting_for_comment)
     await callback.answer(f"Оценка {score} сохранена")
     await callback.message.answer(
-        f"📝 <b>Оценка сохранена: {score}</b>\n\n"
-        "Теперь отправьте текстовый комментарий к работе.\n"
-        "Если комментарий не нужен, нажмите кнопку ниже.",
+        f"✅ <b>Оценка сохранена: {score}</b>\n\n"
+        f"Диапазон оценок: {campaign.min_score}–{campaign.max_score}\n\n"
+        "Что дальше?",
         parse_mode="HTML",
         reply_markup=build_comment_decision_keyboard(),
     )
@@ -644,7 +648,7 @@ async def process_comment(message: types.Message, state: FSMContext) -> None:
     if not message.text:
         await message.answer(
             "⚠️ Сейчас можно отправить только текстовый комментарий.\n"
-            "Если комментарий не нужен, нажмите кнопку «Отправить без комментария».",
+            "Если комментарий не нужен, нажмите кнопку ниже.",
             reply_markup=build_comment_decision_keyboard(),
         )
         return
@@ -655,9 +659,34 @@ async def process_comment(message: types.Message, state: FSMContext) -> None:
     await message.answer(
         "💬 <b>Комментарий сохранён.</b>\n\n"
         f"Текст: {comment_text}\n\n"
-        "Нажмите «Подтвердить», чтобы завершить проверку.",
+        "Выберите действие с работой:",
         parse_mode="HTML",
-        reply_markup=get_confirm_keyboard()
+        reply_markup=build_comment_final_keyboard()
+    )
+
+
+@router.callback_query(F.data == "score_proceed_comment")
+async def handle_score_proceed_comment(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Handle proceed to comment button - ask for comment."""
+    await callback.answer()
+    await callback.message.answer(
+        "📝 <b>Напишите комментарий к работе</b>\n\n"
+        "Комментарий должен содержать ваше мнение о работе, замечания и рекомендации.",
+        parse_mode="HTML",
+        reply_markup=build_comment_skip_keyboard(),
+    )
+    await state.set_state(ExpertReviewState.waiting_for_comment)
+
+
+@router.callback_query(F.data == "score_proceed_ban")
+async def handle_score_proceed_ban(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Handle proceed to ban button - ask for ban reason."""
+    await callback.answer()
+    await state.set_state(ExpertReviewState.waiting_for_ban_reason)
+    await callback.message.answer(
+        "⛔ <b>Пожалуйста, объясните причину жалобы на студента</b>\n\n"
+        "Напишите комментарий (например: плагиат, нарушение правил, оскорбительный тон и т.д.)",
+        parse_mode="HTML",
     )
 
 
@@ -667,8 +696,154 @@ async def handle_comment_skip(callback: types.CallbackQuery, state: FSMContext) 
     await callback.answer("Комментарий будет пропущен")
     await callback.message.answer(
         "💬 Комментарий будет пропущен.\n"
-        "Нажмите «Подтвердить», чтобы сохранить результат.",
-        reply_markup=get_confirm_keyboard(),
+        "Выберите действие с работой:",
+        parse_mode="HTML",
+        reply_markup=build_comment_final_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "ban_request_init")
+async def handle_ban_request_init(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Handle ban request - ask for reason."""
+    data = await state.get_data()
+    submission_id = data.get("submission_id")
+    
+    if not submission_id:
+        await callback.answer("Ошибка: работа не найдена", show_alert=True)
+        return
+    
+    await state.set_state(ExpertReviewState.waiting_for_ban_reason)
+    await callback.answer()
+    await callback.message.answer(
+        "⛔ <b>Пожалуйста, объясните причину жалобы на студента</b>\n\n"
+        "Напишите комментарий (например: плагиат, нарушение правил, оскорбительный тон и т.д.)",
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data == "ban_comment_cancel")
+async def handle_ban_comment_cancel(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Handle ban reason input cancellation."""
+    await callback.answer()
+    data = await state.get_data()
+    score = data.get("score")
+    comment_text = data.get("comment_text")
+    
+    # Go back to comment decision menu
+    await state.set_state(ExpertReviewState.waiting_for_comment)
+    await callback.message.answer(
+        f"⬅️ <b>Вернулись к выбору действия</b>\n\n"
+        f"⭐ Оценка: <b>{score}</b>\n"
+        f"💬 Комментарий: {comment_text or 'Нет'}\n\n"
+        "Выберите действие с работой:",
+        parse_mode="HTML",
+        reply_markup=build_comment_final_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "ban_comment_submit")
+async def handle_ban_comment_submit(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Handle ban reason submission - trigger same as text input."""
+    # This will be handled by message handler for waiting_for_ban_reason state
+    await callback.answer()
+
+
+@router.message(StateFilter(ExpertReviewState.waiting_for_ban_reason))
+async def process_ban_reason(message: types.Message, state: FSMContext, bot: Bot) -> None:
+    """Process ban reason from expert."""
+    if not message.text:
+        await message.answer("⚠️ Пожалуйста, напишите причину жалобы текстом.")
+        return
+    
+    ban_reason = message.text.strip()
+    data = await state.get_data()
+    submission_id = data.get("submission_id")
+    score = data.get("score")
+    comment_text = data.get("comment_text")
+    
+    if not submission_id:
+        await message.answer("❌ Ошибка: работа не найдена.")
+        await state.clear()
+        return
+    
+    tg_id = message.from_user.id
+    
+    logger.info(f"Expert {tg_id} submitting ban request for submission {submission_id}: reason={ban_reason}")
+    
+    # Unlock from Redis
+    await queue_service.unlock_submission(submission_id)
+    
+    # Save review with ban_comment to DB
+    async with session_scope() as session:
+        await create_review(
+            submission_id=submission_id,
+            reviewer_id=tg_id,
+            score=score,
+            comment_text=comment_text,
+            ban_comment=ban_reason,
+            session=session,
+        )
+        await update_submission_status(submission_id, SubmissionStatus.REVIEWED, session)
+        
+        # Get all organizers to notify
+        organizers = await get_users_by_role(UserRole.ORGANIZER, session)
+        expert_organizers = await get_users_by_role(UserRole.EXPERT_ORGANIZER, session)
+        all_organizers = organizers + expert_organizers
+        
+        # Get submission info
+        submission = await get_submission(submission_id, session)
+        campaign = await get_campaign(submission.campaign_id, session)
+        author = await get_user(tg_id=submission.author_id, session=session)
+        reviewer = await get_user(tg_id=tg_id, session=session)
+    
+    # Send ban notification to all organizers
+    ban_notification_text = (
+        "⛔ <b>Жалоба на студента от эксперта</b>\n\n"
+        f"🆔 Студент: <b>{author.full_name if author else 'Unknown'}</b> "
+        f"(<code>{submission.author_id}</code>)\n"
+        f"📋 Кампания: <b>{campaign.title if campaign else 'Unknown'}</b>\n"
+        f"👨‍⚖️ Эксперт: <b>{reviewer.full_name if reviewer else 'Unknown'}</b>\n"
+        f"⭐ Оценка: <b>{score}</b>\n"
+        f"💬 Комментарий эксперта: {comment_text or 'Нет'}\n"
+        f"⚠️ Причина жалобы:\n<b>{ban_reason}</b>"
+    )
+    
+    # Build inline keyboard for organizer to confirm ban
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⛔ Забанить студента", callback_data=f"org_ban_student_{submission.author_id}_{submission_id}")
+    builder.button(text="❌ Отклонить жалобу", callback_data=f"org_reject_ban_{submission_id}")
+    builder.adjust(1)
+    
+    # Notify each organizer
+    for org in all_organizers:
+        try:
+            await bot.send_message(
+                chat_id=org.tg_id,
+                text=ban_notification_text,
+                parse_mode="HTML",
+                reply_markup=builder.as_markup(),
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify organizer {org.tg_id}: {e}")
+    
+    await state.clear()
+    
+    # Show success message to expert
+    await message.answer(
+        "✅ <b>Жалоба отправлена организаторам</b>\n\n"
+        "Спасибо за помощь в поддержании качества платформы.\n"
+        "Организаторы рассмотрят вашу жалобу и примут решение.",
+        parse_mode="HTML",
+    )
+    
+    async with session_scope() as session:
+        user = await get_user(tg_id=tg_id, session=session)
+        reply_markup = get_keyboard_for_role(user.role) if user else None
+    
+    await message.answer(
+        "Можно взять следующую работу или открыть статистику.",
+        reply_markup=build_post_review_keyboard() if reply_markup is None else None,
     )
 
 

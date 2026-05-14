@@ -265,3 +265,8 @@ async def get_users_by_role(
 ) -> list[User]:
     """Get all users with a specific role."""
     return await UserService.get_users_by_role(role, session)
+
+
+async def get_all_users(session: AsyncSession) -> list[User]:
+    """Get all users."""
+    return await UserService.get_all_users(session)

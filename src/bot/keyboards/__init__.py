@@ -106,6 +106,7 @@ def build_organizer_more_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text=BTN_VIEW_RESULTS, callback_data="org_menu_view_results")],
             [InlineKeyboardButton(text=BTN_EXPORT, callback_data="org_menu_export")],
             [InlineKeyboardButton(text=BTN_ANALYTICS, callback_data="org_menu_analytics")],
+            [InlineKeyboardButton(text="🔐 Управлять банами", callback_data="org_menu_banned_users")],
         ]
     )
 
@@ -160,10 +161,42 @@ def build_post_campaign_created_keyboard() -> InlineKeyboardMarkup:
 
 
 def build_comment_decision_keyboard() -> InlineKeyboardMarkup:
+    """Build keyboard after score selection - proceed to comment, ban, or cancel."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Отправить без комментария", callback_data="comment_skip")],
+            [InlineKeyboardButton(text="📝 Оставить комментарий", callback_data="score_proceed_comment")],
+            [InlineKeyboardButton(text="⛔ Пожаловаться на студента", callback_data="score_proceed_ban")],
             [InlineKeyboardButton(text="↩️ Вернуть работу в очередь", callback_data="cancel_review")],
+        ]
+    )
+
+
+def build_comment_final_keyboard() -> InlineKeyboardMarkup:
+    """Build keyboard after comment entry - confirm, ban, or cancel."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Подтвердить оценку", callback_data="confirm_submit")],
+            [InlineKeyboardButton(text="⛔ Пожаловаться на студента", callback_data="ban_request_init")],
+            [InlineKeyboardButton(text="↩️ Вернуть работу в очередь", callback_data="cancel_review")],
+        ]
+    )
+
+
+def build_ban_comment_keyboard() -> InlineKeyboardMarkup:
+    """Build keyboard for entering ban reason comment."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Отправить", callback_data="ban_comment_submit")],
+            [InlineKeyboardButton(text="↩️ Отмена", callback_data="ban_comment_cancel")],
+        ]
+    )
+
+
+def build_comment_skip_keyboard() -> InlineKeyboardMarkup:
+    """Build keyboard for skipping comment after score selection."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⏭️ Пропустить комментарий", callback_data="comment_skip")],
         ]
     )
 
@@ -177,6 +210,11 @@ def build_review_confirmation_keyboard() -> InlineKeyboardMarkup:
             ]
         ]
     )
+
+
+def get_confirm_keyboard() -> InlineKeyboardMarkup:
+    """Alias for build_review_confirmation_keyboard for compatibility."""
+    return build_review_confirmation_keyboard()
 
 
 def get_keyboard_for_role(role: UserRole):

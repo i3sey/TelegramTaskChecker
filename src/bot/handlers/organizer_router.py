@@ -1,14 +1,15 @@
 """Organizer handler router for session and results management."""
 
 from typing import Any
-from aiogram import Router, types, F
+from aiogram import Router, types, F, Bot
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 from src.db.engine import session_scope
 from src.db.models import UserRole
-from src.bot.services.user_service import get_user
+from src.bot.services.user_service import get_user, ban_user, unban_user, get_all_users
+from src.bot.utils.logging import logger
 from src.bot.keyboards import (
     BTN_CREATE_CAMPAIGN,
     BTN_MY_CAMPAIGNS,
@@ -19,7 +20,9 @@ from src.bot.keyboards import (
     BTN_EXPORT,
     BTN_ANALYTICS,
     build_organizer_more_keyboard,
+    get_keyboard_for_role,
 )
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
 router = Router()
@@ -274,3 +277,209 @@ async def org_menu_analytics(callback: types.CallbackQuery) -> None:
         return
     await cmd_analytics(callback.message)
     await callback.answer()
+
+
+@router.callback_query(F.data == "org_menu_banned_users")
+async def org_menu_banned_users(callback: types.CallbackQuery) -> None:
+    if not callback.message:
+        await callback.answer("❌ Ошибка: не удалось получить сообщение", show_alert=True)
+        return
+    await cmd_banned_users(callback.message)
+    await callback.answer()
+
+
+# Ban/Unban management handlers
+@router.callback_query(F.data.startswith("org_ban_student_"))
+async def handle_ban_confirmation(callback: types.CallbackQuery, bot: Bot) -> None:
+    """Handle ban confirmation from organizer."""
+    if not callback.from_user:
+        await callback.answer("❌ Ошибка аутентификации", show_alert=True)
+        return
+    
+    async with session_scope() as session:
+        user = await get_user(tg_id=callback.from_user.id, session=session)
+        if not user or user.role not in (UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER):
+            await callback.answer("❌ Доступ запрещен", show_alert=True)
+            return
+    
+    # Parse callback data: org_ban_student_{student_id}_{submission_id}
+    parts = callback.data.removeprefix("org_ban_student_").split("_")
+    if len(parts) < 2:
+        await callback.answer("❌ Некорректный запрос", show_alert=True)
+        return
+    
+    try:
+        student_id = int(parts[0])
+        submission_id = int(parts[1])
+    except (ValueError, IndexError):
+        await callback.answer("❌ Ошибка обработки данных", show_alert=True)
+        return
+    
+    async with session_scope() as session:
+        student = await get_user(tg_id=student_id, session=session)
+        if not student:
+            await callback.answer(f"❌ Студент с ID {student_id} не найден", show_alert=True)
+            return
+        
+        if student.is_banned:
+            await callback.answer(f"⚠️ Студент {student.full_name} уже забанен", show_alert=True)
+            return
+        
+        # Ban the student
+        await ban_user(student_id, session)
+    
+    logger.info(f"Organizer {callback.from_user.id} banned student {student_id} (submission {submission_id})")
+    
+    # Notify organizer
+    await callback.answer(f"✅ Студент {student.full_name} забанен", show_alert=True)
+    
+    # Update the message
+    await callback.message.edit_text(
+        callback.message.text + f"\n\n✅ <b>Студент забанен организатором {user.full_name}</b>",
+        parse_mode="HTML",
+    )
+    
+    # Try to notify the banned student
+    try:
+        await bot.send_message(
+            chat_id=student_id,
+            text="⛔ <b>Вы были заблокированы в системе</b>\n\n"
+                 "Причина: нарушение правил платформы.\n\n"
+                 "Если это ошибка, свяжитесь с администратором.",
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        logger.warning(f"Failed to notify banned student {student_id}: {e}")
+
+
+@router.callback_query(F.data.startswith("org_reject_ban_"))
+async def handle_ban_rejection(callback: types.CallbackQuery) -> None:
+    """Handle ban request rejection."""
+    if not callback.from_user:
+        await callback.answer("❌ Ошибка аутентификации", show_alert=True)
+        return
+    
+    async with session_scope() as session:
+        user = await get_user(tg_id=callback.from_user.id, session=session)
+        if not user or user.role not in (UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER):
+            await callback.answer("❌ Доступ запрещен", show_alert=True)
+            return
+    
+    submission_id_str = callback.data.removeprefix("org_reject_ban_")
+    
+    try:
+        submission_id = int(submission_id_str)
+    except ValueError:
+        await callback.answer("❌ Ошибка обработки данных", show_alert=True)
+        return
+    
+    logger.info(f"Organizer {callback.from_user.id} rejected ban request for submission {submission_id}")
+    
+    # Notify organizer
+    await callback.answer("✅ Жалоба отклонена", show_alert=True)
+    
+    # Update the message
+    await callback.message.edit_text(
+        callback.message.text + f"\n\n❌ <b>Жалоба отклонена организатором {user.full_name}</b>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command("banned_users"))
+async def cmd_banned_users(message: types.Message) -> None:
+    """Show list of banned users and allow unban."""
+    async with session_scope() as session:
+        user = await get_user(tg_id=message.from_user.id, session=session)
+        if not user or user.role not in (UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER):
+            await message.answer("❌ Эта команда доступна только организаторам.")
+            return
+        
+        all_users = await get_all_users(session)
+        banned_users = [u for u in all_users if u.is_banned]
+    
+    if not banned_users:
+        await message.answer("✅ Нет забанённых пользователей.")
+        return
+    
+    text = "⛔ <b>Забанённые пользователи</b>\n\n"
+    
+    builder = InlineKeyboardBuilder()
+    
+    for banned_user in banned_users:
+        text += f"• <code>{banned_user.tg_id}</code> — <b>{banned_user.full_name}</b>\n"
+        builder.button(
+            text=f"✅ Разбанить {banned_user.full_name[:20]}",
+            callback_data=f"org_unban_{banned_user.tg_id}",
+        )
+    
+    builder.adjust(1)
+    
+    await message.answer(
+        text,
+        parse_mode="HTML",
+        reply_markup=builder.as_markup(),
+    )
+
+
+@router.callback_query(F.data.startswith("org_unban_"))
+async def handle_unban(callback: types.CallbackQuery) -> None:
+    """Handle unban action."""
+    if not callback.from_user:
+        await callback.answer("❌ Ошибка аутентификации", show_alert=True)
+        return
+    
+    async with session_scope() as session:
+        user = await get_user(tg_id=callback.from_user.id, session=session)
+        if not user or user.role not in (UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER):
+            await callback.answer("❌ Доступ запрещен", show_alert=True)
+            return
+    
+    student_id_str = callback.data.removeprefix("org_unban_")
+    
+    try:
+        student_id = int(student_id_str)
+    except ValueError:
+        await callback.answer("❌ Ошибка обработки данных", show_alert=True)
+        return
+    
+    async with session_scope() as session:
+        student = await get_user(tg_id=student_id, session=session)
+        if not student:
+            await callback.answer(f"❌ Студент с ID {student_id} не найден", show_alert=True)
+            return
+        
+        if not student.is_banned:
+            await callback.answer(f"⚠️ Студент {student.full_name} не забанен", show_alert=True)
+            return
+        
+        # Unban the student
+        await unban_user(student_id, session)
+    
+    logger.info(f"Organizer {callback.from_user.id} unbanned student {student_id}")
+    
+    # Notify organizer
+    await callback.answer(f"✅ Студент {student.full_name} разбанен", show_alert=True)
+    
+    # Update the message
+    text = callback.message.text or ""
+    text = text.replace(f"<code>{student_id}</code> — <b>{student.full_name}</b>", "")
+    
+    # Show updated list or message about no banned users
+    if len(text.strip()) < 50:
+        await callback.message.edit_text("✅ Нет забанённых пользователей.")
+    else:
+        await callback.message.edit_text(text, parse_mode="HTML")
+    
+    # Try to notify the unbanned student
+    keyboard = get_keyboard_for_role(student.role) if student else None
+    
+    try:
+        await callback.bot.send_message(
+            chat_id=student_id,
+            text="✅ <b>Вы были разблокированы в системе</b>\n\n"
+                 "Теперь вы можете снова использовать бота.",
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to notify unbanned student {student_id}: {e}")

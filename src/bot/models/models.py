@@ -239,6 +239,7 @@ class Review(Base):
     score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     comment_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     voice_file_id: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    ban_comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

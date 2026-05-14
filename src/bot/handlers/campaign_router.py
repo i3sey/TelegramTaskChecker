@@ -37,6 +37,7 @@ from src.bot.keyboards import (
     build_campaign_anonymous_keyboard,
     build_post_submission_keyboard,
     build_post_campaign_created_keyboard,
+    get_keyboard_for_role,
 )
 from src.bot.ui import campaign_type_label, format_ttl_minutes, submission_status_meta, voting_type_label
 
@@ -1265,8 +1266,6 @@ async def process_submission_file(message: types.Message, state: FSMContext):
             )
             
             # Get user role for keyboard
-            from src.db.models import UserRole
-            from src.bot.services.user_service import get_user
             user = await get_user(tg_id=tg_id, session=session)
             if user:
                 await message.answer(

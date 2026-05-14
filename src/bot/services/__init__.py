@@ -6,6 +6,7 @@ from src.bot.services.user_service import (
     ban_user,
     unban_user,
     get_users_by_role,
+    get_all_users,
     update_user_registered_by_code,
     update_user_invite_role,
 )
@@ -50,6 +51,7 @@ __all__ = [
     "ban_user",
     "unban_user",
     "get_users_by_role",
+    "get_all_users",
     "update_user_registered_by_code",
     "update_user_invite_role",
     "get_campaign",

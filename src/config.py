@@ -44,6 +44,7 @@ class Config:
     db: DatabaseConfig
     redis: RedisConfig
     sheets: SheetsConfig
+    admin_ids: set[int]
 
 
 def _get_database_url() -> str:
@@ -69,6 +70,23 @@ def _get_redis_url() -> str:
     return f"redis://{host}:{port}/{db}"
 
 
+def _get_admin_ids() -> set[int]:
+    """Parse comma-separated Telegram admin IDs from environment."""
+    raw_value = os.getenv("ADMIN_IDS", "")
+    admin_ids: set[int] = set()
+
+    for item in raw_value.replace(";", ",").split(","):
+        value = item.strip()
+        if not value:
+            continue
+        try:
+            admin_ids.add(int(value))
+        except ValueError:
+            continue
+
+    return admin_ids
+
+
 config = Config(
     DEBUG=os.getenv("DEBUG", "false").lower() in ("true", "1", "yes"),
     bot=BotConfig(
@@ -89,4 +107,5 @@ config = Config(
         spreadsheet_id=os.getenv("GOOGLE_SHEETS_ID") or None,
         credentials_path=os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE") or None,
     ),
+    admin_ids=_get_admin_ids(),
 )
