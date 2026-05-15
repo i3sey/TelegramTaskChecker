@@ -1,10 +1,12 @@
 """User service for database operations."""
-from sqlalchemy import select
+
+from sqlalchemy import String, cast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.bot.models import User, UserRole
 from src.bot.utils.logging import logger
 
+ROLE_ALIASES: dict[str, UserRole] = {role.value: role for role in UserRole}
 
 class UserService:
     """Service for user-related database operations."""
@@ -183,6 +185,53 @@ class UserService:
         return list(result.scalars().all())
 
     @staticmethod
+    async def get_users(
+        session: AsyncSession,
+        query: str | None = None,
+        role: UserRole | None = None,
+        tg_id: int | None = None,
+    ) -> list[User]:
+        """
+        Get users with optional filters.
+
+        Args:
+            session: Database session
+            query: Search query for name, Telegram ID or role
+            role: Exact role filter
+            tg_id: Exact Telegram ID filter
+
+        Returns:
+            List of matching User objects
+        """
+        stmt = select(User)
+        filters = []
+
+        if tg_id is not None:
+            filters.append(User.tg_id == tg_id)
+
+        if role is not None:
+            filters.append(User.role == role)
+
+        if query:
+            normalized = query.strip()
+            if normalized:
+                search_filters = [
+                    User.full_name.ilike(f"%{normalized}%"),
+                    cast(User.tg_id, String).ilike(f"%{normalized}%"),
+                ]
+                matched_role = ROLE_ALIASES.get(normalized.lower())
+                if matched_role:
+                    search_filters.append(User.role == matched_role)
+                filters.append(or_(*search_filters))
+
+        if filters:
+            stmt = stmt.where(*filters)
+
+        stmt = stmt.order_by(User.created_at.desc())
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
+
+    @staticmethod
     async def get_all_users(session: AsyncSession) -> list[User]:
         """
         Get all users.
@@ -193,15 +242,12 @@ class UserService:
         Returns:
             List of all User objects
         """
-        result = await session.execute(select(User))
-        return list(result.scalars().all())
-
+        return await UserService.get_users(session)
 
 # Module-level convenience functions
 async def get_user(tg_id: int, session: AsyncSession) -> User | None:
     """Get user by Telegram ID."""
     return await UserService.get_user(tg_id, session)
-
 
 async def create_user(
     tg_id: int,
@@ -217,7 +263,6 @@ async def create_user(
         tg_id, full_name, study_group, session, role, registered_by_code, invite_role
     )
 
-
 async def update_user_role(
     tg_id: int,
     role: UserRole,
@@ -225,7 +270,6 @@ async def update_user_role(
 ) -> User | None:
     """Update user's role."""
     return await UserService.update_user_role(tg_id, role, session)
-
 
 async def update_user_registered_by_code(
     tg_id: int,
@@ -237,7 +281,6 @@ async def update_user_registered_by_code(
         tg_id, registered_by_code, session
     )
 
-
 async def update_user_invite_role(
     tg_id: int,
     invite_role: str | None,
@@ -248,16 +291,13 @@ async def update_user_invite_role(
         tg_id, invite_role, session
     )
 
-
 async def ban_user(tg_id: int, session: AsyncSession) -> User | None:
     """Ban a user."""
     return await UserService.ban_user(tg_id, session)
 
-
 async def unban_user(tg_id: int, session: AsyncSession) -> User | None:
     """Unban a user."""
     return await UserService.unban_user(tg_id, session)
-
 
 async def get_users_by_role(
     role: UserRole,
@@ -266,6 +306,14 @@ async def get_users_by_role(
     """Get all users with a specific role."""
     return await UserService.get_users_by_role(role, session)
 
+async def get_users(
+    session: AsyncSession,
+    query: str | None = None,
+    role: UserRole | None = None,
+    tg_id: int | None = None,
+) -> list[User]:
+    """Get users with optional filters."""
+    return await UserService.get_users(session, query=query, role=role, tg_id=tg_id)
 
 async def get_all_users(session: AsyncSession) -> list[User]:
     """Get all users."""
