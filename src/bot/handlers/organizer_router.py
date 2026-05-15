@@ -1,5 +1,6 @@
 """Organizer handler router for session and results management."""
 
+from html import escape
 from typing import Any
 from aiogram import Router, types, F, Bot
 from aiogram.filters import Command
@@ -9,6 +10,7 @@ from aiogram.fsm.state import State, StatesGroup
 from src.db.engine import session_scope
 from src.db.models import UserRole
 from src.bot.services.user_service import get_user, ban_user, unban_user, get_all_users
+from src.bot.services.campaign_service import get_campaign_results
 from src.bot.utils.logging import logger
 from src.bot.keyboards import (
     BTN_CREATE_CAMPAIGN,
@@ -109,16 +111,49 @@ async def process_criteria(message: types.Message, state: FSMContext) -> None:
     await state.clear()
 
 
+def _format_results_text(results: list[dict]) -> str:
+    if not results:
+        return "📭 <b>Результаты кампаний отсутствуют</b>"
+
+    blocks: list[str] = ["📊 <b>Результаты кампаний</b>"]
+    for item in results:
+        campaign = item["campaign"]
+        status_summary = item["status_summary"]
+
+        comments = item["comments"]
+        comments_text = (
+            "\n".join(f"• {escape(comment)}" for comment in comments[:5])
+            if comments
+            else "• нет комментариев"
+        )
+
+        status_text = "\n".join(
+            [
+                f"• Загружено: {status_summary.get('uploaded', 0)}",
+                f"• На проверке: {status_summary.get('in_review', 0)}",
+                f"• Проверено: {status_summary.get('reviewed', 0)}",
+                f"• Отклонено: {status_summary.get('rejected', 0)}",
+            ]
+        )
+
+        blocks.append(
+            f"\n<b>{escape(campaign.title)}</b>\n"
+            f"📌 Тип: {campaign.type.value}\n"
+            f"📝 Работ: {item['total_submissions']}\n"
+            f"✅ Проверено: {item['reviewed_submissions']}\n"
+            f"⭐ Средняя оценка: {item['avg_score']:.2f}\n"
+            f"💬 Комментарии:\n{comments_text}\n"
+            f"📈 Сводка по статусам:\n{status_text}"
+        )
+
+    return "\n".join(blocks)
+
 @router.message(Command("view_results"))
 async def cmd_view_results(message: types.Message) -> None:
     """
     Handle /view_results command to see all feedback and results.
-    
+
     Displays compiled feedback and ratings from all reviews.
-    
-    Args:
-        message: Telegram message object
-        user_id: Telegram user ID
     """
     async with session_scope() as session:
         user = await get_user(tg_id=message.from_user.id, session=session)
@@ -126,22 +161,14 @@ async def cmd_view_results(message: types.Message) -> None:
             await message.answer("❌ Эта команда доступна только организаторам.")
             return
 
-    await message.answer(
-        "⚠️ Просмотр результатов временно недоступен.\n"
-        "Функция будет добавлена позже."
-    )
+        results = await get_campaign_results(session)
+
+    await message.answer(_format_results_text(results), parse_mode="HTML")
 
 
 @router.message(Command("export"))
 async def cmd_export(message: types.Message) -> None:
-    """
-    Handle /export command to export results to Google Sheets.
-    
-    Placeholder for Google Sheets integration.
-    
-    Args:
-        message: Telegram message object
-    """
+    """Export results to Google Sheets when the integration is ready."""
     async with session_scope() as session:
         user = await get_user(tg_id=message.from_user.id, session=session)
         if not user or user.role not in (UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER):
@@ -168,6 +195,7 @@ async def cmd_manage_users(message: types.Message) -> None:
             await message.answer("❌ Эта команда доступна только организаторам.")
             return
 
+    # TODO: Добавить список пользователей, поиск, бан/разбан и при необходимости изменение ролей.
     await message.answer(
         "⚠️ Управление пользователями временно недоступно.\n"
         "Функция будет добавлена позже."
@@ -188,6 +216,7 @@ async def cmd_analytics(message: types.Message) -> None:
             await message.answer("❌ Эта команда доступна только организаторам.")
             return
 
+    # TODO: Добавить аналитику по кампаниям и пользователям: метрики активности, проверок и результатов.
     await message.answer(
         "⚠️ Аналитика временно недоступна.\n"
         "Функция будет добавлена позже."

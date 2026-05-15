@@ -1,11 +1,11 @@
 """Campaign service for database operations."""
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import select, and_
+
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.bot.models import Campaign, CampaignType
+from src.bot.models import Campaign, CampaignType, Review, Submission, SubmissionStatus
 from src.bot.utils.logging import logger
-
 
 class CampaignService:
     """Service for campaign-related database operations."""
@@ -108,8 +108,8 @@ class CampaignService:
         """
         await CampaignService._deactivate_expired_campaigns(session)
 
-        # TODO: Add organizer_id to Campaign model for proper filtering
-        # For MVP, return all campaigns (organizers can see all)
+        # The Campaign model does not store organizer_id yet, so organizer-specific filtering
+        # is not available. For now, organizers see the full list of campaigns.
         result = await session.execute(
             select(Campaign)
             .order_by(Campaign.created_at.desc())
@@ -212,17 +212,139 @@ class CampaignService:
             campaign_id, session, is_active=is_active
         )
 
+    @staticmethod
+    async def get_campaign_results(session: AsyncSession) -> list[dict]:
+        """
+        Get aggregated campaign results.
+
+        Returns:
+            List of campaign result dictionaries with totals, averages,
+            comments and status summary.
+        """
+        await CampaignService._deactivate_expired_campaigns(session)
+
+        campaigns_result = await session.execute(
+            select(Campaign).order_by(Campaign.created_at.desc())
+        )
+        campaigns = list(campaigns_result.scalars().all())
+        if not campaigns:
+            return []
+
+        campaign_ids = [campaign.id for campaign in campaigns]
+
+        submissions_count_result = await session.execute(
+            select(
+                Submission.campaign_id,
+                func.count(Submission.id)
+            )
+            .where(Submission.campaign_id.in_(campaign_ids))
+            .group_by(Submission.campaign_id)
+        )
+        submissions_count = {
+            int(campaign_id): int(count)
+            for campaign_id, count in submissions_count_result.all()
+        }
+
+        reviewed_count_result = await session.execute(
+            select(
+                Submission.campaign_id,
+                func.count(Submission.id)
+            )
+            .where(
+                Submission.campaign_id.in_(campaign_ids),
+                Submission.status == SubmissionStatus.REVIEWED,
+            )
+            .group_by(Submission.campaign_id)
+        )
+        reviewed_count = {
+            int(campaign_id): int(count)
+            for campaign_id, count in reviewed_count_result.all()
+        }
+
+        avg_score_result = await session.execute(
+            select(
+                Submission.campaign_id,
+                func.avg(Review.score)
+            )
+            .join(Submission, Review.submission_id == Submission.id)
+            .where(Submission.campaign_id.in_(campaign_ids))
+            .group_by(Submission.campaign_id)
+        )
+        avg_scores = {
+            int(campaign_id): float(avg_score) if avg_score is not None else 0.0
+            for campaign_id, avg_score in avg_score_result.all()
+        }
+
+        status_counts_result = await session.execute(
+            select(
+                Submission.campaign_id,
+                Submission.status,
+                func.count(Submission.id)
+            )
+            .where(Submission.campaign_id.in_(campaign_ids))
+            .group_by(Submission.campaign_id, Submission.status)
+        )
+        status_counts: dict[int, dict[str, int]] = {}
+        for campaign_id, status, count in status_counts_result.all():
+            campaign_id = int(campaign_id)
+            status_counts.setdefault(campaign_id, {})
+            status_counts[campaign_id][status.value] = int(count)
+
+        comments_result = await session.execute(
+            select(
+                Submission.campaign_id,
+                Review.comment_text,
+                Review.ban_comment,
+            )
+            .join(Submission, Review.submission_id == Submission.id)
+            .where(Submission.campaign_id.in_(campaign_ids))
+            .order_by(Review.created_at.desc())
+        )
+        comments_by_campaign: dict[int, list[str]] = {}
+        for campaign_id, comment_text, ban_comment in comments_result.all():
+            campaign_id = int(campaign_id)
+            comments = comments_by_campaign.setdefault(campaign_id, [])
+            for comment in (comment_text, ban_comment):
+                if comment and comment.strip():
+                    comments.append(comment.strip())
+
+        results: list[dict] = []
+        for campaign in campaigns:
+            campaign_id = campaign.id
+            results.append(
+                {
+                    "campaign": campaign,
+                    "total_submissions": submissions_count.get(campaign_id, 0),
+                    "reviewed_submissions": reviewed_count.get(campaign_id, 0),
+                    "avg_score": round(avg_scores.get(campaign_id, 0.0), 2),
+                    "comments": comments_by_campaign.get(campaign_id, [])[:5],
+                    "status_summary": {
+                        "uploaded": status_counts.get(campaign_id, {}).get(
+                            SubmissionStatus.UPLOADED.value, 0
+                        ),
+                        "in_review": status_counts.get(campaign_id, {}).get(
+                            SubmissionStatus.IN_REVIEW.value, 0
+                        ),
+                        "reviewed": status_counts.get(campaign_id, {}).get(
+                            SubmissionStatus.REVIEWED.value, 0
+                        ),
+                        "rejected": status_counts.get(campaign_id, {}).get(
+                            SubmissionStatus.REJECTED.value, 0
+                        ),
+                    },
+                }
+            )
+
+        return results
 
 # Module-level convenience functions
 async def get_campaign(campaign_id: int, session: AsyncSession) -> Campaign | None:
     """Get campaign by ID."""
     return await CampaignService.get_campaign(campaign_id, session)
 
-
 async def get_active_campaigns(session: AsyncSession) -> list[Campaign]:
     """Get all active campaigns."""
     return await CampaignService.get_active_campaigns(session)
-
 
 async def get_campaigns_by_organizer(
     organizer_id: int,
@@ -230,7 +352,6 @@ async def get_campaigns_by_organizer(
 ) -> list[Campaign]:
     """Get campaigns by organizer."""
     return await CampaignService.get_campaigns_by_organizer(organizer_id, session)
-
 
 async def create_campaign(
     title: str,
@@ -252,7 +373,6 @@ async def create_campaign(
         voting_type, organizer_id, session
     )
 
-
 async def update_campaign(
     campaign_id: int,
     session: AsyncSession,
@@ -261,7 +381,6 @@ async def update_campaign(
     """Update campaign."""
     return await CampaignService.update_campaign(campaign_id, session, **kwargs)
 
-
 async def toggle_campaign_active(
     campaign_id: int,
     is_active: bool,
@@ -269,3 +388,7 @@ async def toggle_campaign_active(
 ) -> Campaign | None:
     """Toggle campaign active status."""
     return await CampaignService.toggle_campaign_active(campaign_id, is_active, session)
+
+async def get_campaign_results(session: AsyncSession) -> list[dict]:
+    """Get aggregated campaign results."""
+    return await CampaignService.get_campaign_results(session)
