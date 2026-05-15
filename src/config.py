@@ -8,13 +8,11 @@ from dotenv import load_dotenv
 env_path = Path(__file__).parent.parent.parent / ".env"
 load_dotenv(env_path)
 
-
 @dataclass
 class BotConfig:
     """Telegram bot configuration."""
     token: str
     proxy: dict | None = None  # e.g., {"http": "socks5://...", "https": "socks5://..."}
-
 
 @dataclass
 class DatabaseConfig:
@@ -22,19 +20,10 @@ class DatabaseConfig:
     url: str
     echo: bool = False
 
-
 @dataclass
 class RedisConfig:
     """Redis configuration."""
     url: str
-
-
-@dataclass
-class SheetsConfig:
-    """Google Sheets configuration."""
-    spreadsheet_id: str | None
-    credentials_path: str | None
-
 
 @dataclass
 class Config:
@@ -43,9 +32,7 @@ class Config:
     bot: BotConfig
     db: DatabaseConfig
     redis: RedisConfig
-    sheets: SheetsConfig
     admin_ids: set[int]
-
 
 def _get_database_url() -> str:
     """Build database URL from environment variables."""
@@ -57,7 +44,6 @@ def _get_database_url() -> str:
 
     return f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{db_name}"
 
-
 def _get_redis_url() -> str:
     """Build Redis URL from environment variables."""
     host = os.getenv("REDIS_HOST", "localhost")
@@ -68,7 +54,6 @@ def _get_redis_url() -> str:
     if password:
         return f"redis://:{password}@{host}:{port}/{db}"
     return f"redis://{host}:{port}/{db}"
-
 
 def _get_admin_ids() -> set[int]:
     """Parse comma-separated Telegram admin IDs from environment."""
@@ -86,7 +71,6 @@ def _get_admin_ids() -> set[int]:
 
     return admin_ids
 
-
 config = Config(
     DEBUG=os.getenv("DEBUG", "false").lower() in ("true", "1", "yes"),
     bot=BotConfig(
@@ -102,10 +86,6 @@ config = Config(
     ),
     redis=RedisConfig(
         url=_get_redis_url(),
-    ),
-    sheets=SheetsConfig(
-        spreadsheet_id=os.getenv("GOOGLE_SHEETS_ID") or None,
-        credentials_path=os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE") or None,
     ),
     admin_ids=_get_admin_ids(),
 )

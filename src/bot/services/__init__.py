@@ -34,7 +34,7 @@ from src.bot.services.review_service import (
     count_pending_submissions,
 )
 from src.bot.services.queue_service import queue_service, QueueService
-from src.bot.services.sheets_service import SheetsService
+from src.bot.services.xlsx_export_service import XlsxExportService
 from src.bot.services.notification_service import NotificationService
 from src.bot.services.invite_service import (
     create_invite,
@@ -73,7 +73,7 @@ __all__ = [
     "count_pending_submissions",
     "queue_service",
     "QueueService",
-    "SheetsService",
+    "XlsxExportService",
     "NotificationService",
     "create_invite",
     "get_invite_by_code",

@@ -2,39 +2,124 @@
 
 from html import escape
 from typing import Any
-from aiogram import Router, types, F, Bot
+
+from aiogram import Bot, F, Router, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import BufferedInputFile
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from src.db.engine import session_scope
-from src.db.models import UserRole
-from src.bot.services.user_service import get_user, ban_user, unban_user, get_all_users
-from src.bot.services.campaign_service import get_campaign_results
-from src.bot.utils.logging import logger
 from src.bot.keyboards import (
+    BTN_ANALYTICS,
     BTN_CREATE_CAMPAIGN,
-    BTN_MY_CAMPAIGNS,
+    BTN_EXPORT,
     BTN_MORE,
+    BTN_MY_CAMPAIGNS,
     BTN_SET_CRITERIA,
     BTN_VIEW_RESULTS,
-    BTN_EXPORT,
-    BTN_ANALYTICS,
     build_organizer_more_keyboard,
     get_keyboard_for_role,
 )
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from src.bot.services.campaign_service import (
+    get_campaign_export_rows,
+    get_campaign_results,
+    get_completed_campaigns_for_export,
+)
+from src.bot.services.user_service import get_all_users, get_user, ban_user, unban_user
+from src.bot.services.xlsx_export_service import XlsxExportService
+from src.bot.utils.logging import logger
+from src.db.engine import session_scope
+from src.db.models import UserRole
 
+EXPORT_HEADERS = [
+    "ID кампании",
+    "Название кампании",
+    "Тип кампании",
+    "ID работы",
+    "Статус работы",
+    "Дата отправки работы",
+    "Telegram ID автора",
+    "Автор",
+    "Учебная группа",
+    "Telegram ID проверяющего",
+    "Проверяющий",
+    "Оценка",
+    "Комментарий",
+    "Причина бана",
+    "Дата проверки",
+]
+
+CAMPAIGN_TYPE_LABELS = {
+    "expert": "Экспертная проверка",
+    "p2p": "Взаимопроверка",
+    "voting": "Голосование",
+}
+
+SUBMISSION_STATUS_LABELS = {
+    "uploaded": "Загружена",
+    "in_review": "На проверке",
+    "reviewed": "Проверена",
+    "rejected": "Отклонена",
+}
+
+xlsx_export_service = XlsxExportService()
+
+def _format_export_value(value: Any) -> Any:
+    """Normalize values for human-readable spreadsheet export."""
+    if value is None:
+        return ""
+    return value
+
+def _build_export_rows(rows: list[dict[str, Any]]) -> list[list[Any]]:
+    """Convert export row dictionaries into human-readable spreadsheet rows."""
+    return [
+        [
+            _format_export_value(row.get("campaign_id")),
+            _format_export_value(row.get("campaign_title")),
+            CAMPAIGN_TYPE_LABELS.get(
+                str(row.get("campaign_type") or ""),
+                _format_export_value(row.get("campaign_type")),
+            ),
+            _format_export_value(row.get("submission_id")),
+            SUBMISSION_STATUS_LABELS.get(
+                str(row.get("submission_status") or ""),
+                _format_export_value(row.get("submission_status")),
+            ),
+            _format_export_value(row.get("submission_created_at")),
+            _format_export_value(row.get("author_tg_id")),
+            _format_export_value(row.get("author_full_name")),
+            _format_export_value(row.get("author_study_group")),
+            _format_export_value(row.get("reviewer_tg_id")),
+            _format_export_value(row.get("reviewer_full_name")),
+            _format_export_value(row.get("score")),
+            _format_export_value(row.get("comment_text")),
+            _format_export_value(row.get("ban_comment")),
+            _format_export_value(row.get("review_created_at")),
+        ]
+        for row in rows
+    ]
+
+def _build_completed_campaigns_export_keyboard(campaigns: list[Any]) -> types.InlineKeyboardMarkup:
+    """Build inline keyboard for completed campaigns export."""
+    builder = InlineKeyboardBuilder()
+
+    for campaign in campaigns:
+        builder.button(
+            text=f"#{campaign.id} · {campaign.title[:40]}",
+            callback_data=f"org_export_campaign_{campaign.id}",
+        )
+
+    builder.adjust(1)
+    return builder.as_markup()
 
 router = Router()
 router.name = "organizer_router"
-
 
 class OrganizerCriteriaState(StatesGroup):
     """FSM for collecting organizer evaluation criteria."""
 
     awaiting_criteria = State()
-
 
 @router.message(Command("invites"))
 async def cmd_invites(message: types.Message) -> None:
@@ -51,7 +136,6 @@ async def cmd_invites(message: types.Message) -> None:
         "Чтобы получить новые ссылки, создайте кампанию или откройте её из списка кампаний.",
         parse_mode="HTML",
     )
-
 
 @router.message(Command("set_criteria"))
 async def cmd_set_criteria(
@@ -83,7 +167,6 @@ async def cmd_set_criteria(
     await message.answer(criteria_text, parse_mode="HTML")
     await state.set_state(OrganizerCriteriaState.awaiting_criteria)
 
-
 @router.message(OrganizerCriteriaState.awaiting_criteria)
 async def process_criteria(message: types.Message, state: FSMContext) -> None:
     """Process evaluation criteria from organizer."""
@@ -109,7 +192,6 @@ async def process_criteria(message: types.Message, state: FSMContext) -> None:
         parse_mode="HTML",
     )
     await state.clear()
-
 
 def _format_results_text(results: list[dict]) -> str:
     if not results:
@@ -165,21 +247,27 @@ async def cmd_view_results(message: types.Message) -> None:
 
     await message.answer(_format_results_text(results), parse_mode="HTML")
 
-
 @router.message(Command("export"))
 async def cmd_export(message: types.Message) -> None:
-    """Export results to Google Sheets when the integration is ready."""
+    """Show completed campaigns available for XLSX export."""
     async with session_scope() as session:
         user = await get_user(tg_id=message.from_user.id, session=session)
         if not user or user.role not in (UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER):
             await message.answer("❌ Эта команда доступна только организаторам.")
             return
 
-    await message.answer(
-        "⚠️ Экспорт в Google Sheets временно недоступен.\n"
-        "Функция будет добавлена позже."
-    )
+        campaigns = await get_completed_campaigns_for_export(session)
 
+    if not campaigns:
+        await message.answer("📭 Нет завершённых кампаний для экспорта.")
+        return
+
+    await message.answer(
+        "📤 <b>Экспорт в XLSX</b>\n\n"
+        "Выберите завершённую кампанию для выгрузки:",
+        parse_mode="HTML",
+        reply_markup=_build_completed_campaigns_export_keyboard(campaigns),
+    )
 
 @router.message(Command("manage_users"))
 async def cmd_manage_users(message: types.Message) -> None:
@@ -201,7 +289,6 @@ async def cmd_manage_users(message: types.Message) -> None:
         "Функция будет добавлена позже."
     )
 
-
 @router.message(Command("analytics"))
 async def cmd_analytics(message: types.Message) -> None:
     """
@@ -222,13 +309,11 @@ async def cmd_analytics(message: types.Message) -> None:
         "Функция будет добавлена позже."
     )
 
-
 @router.message(F.text == BTN_CREATE_CAMPAIGN)
 async def btn_create_campaign(message: types.Message, state: FSMContext) -> None:
     from src.bot.handlers.campaign_router import cmd_create_campaign
 
     await cmd_create_campaign(message, state)
-
 
 @router.message(F.text == BTN_MY_CAMPAIGNS)
 async def btn_my_campaigns(message: types.Message) -> None:
@@ -236,26 +321,21 @@ async def btn_my_campaigns(message: types.Message) -> None:
 
     await cmd_my_campaigns(message)
 
-
 @router.message(F.text == BTN_SET_CRITERIA)
 async def btn_set_criteria(message: types.Message, state: FSMContext) -> None:
     await cmd_set_criteria(message, state)
-
 
 @router.message(F.text == BTN_VIEW_RESULTS)
 async def btn_view_results(message: types.Message) -> None:
     await cmd_view_results(message)
 
-
 @router.message(F.text == BTN_EXPORT)
 async def btn_export(message: types.Message) -> None:
     await cmd_export(message)
 
-
 @router.message(F.text == BTN_ANALYTICS)
 async def btn_analytics(message: types.Message) -> None:
     await cmd_analytics(message)
-
 
 @router.message(F.text == BTN_MORE)
 async def btn_more(message: types.Message) -> None:
@@ -265,7 +345,6 @@ async def btn_more(message: types.Message) -> None:
         reply_markup=build_organizer_more_keyboard(),
     )
 
-
 @router.callback_query(F.data == "org_menu_set_criteria")
 async def org_menu_set_criteria(callback: types.CallbackQuery, state: FSMContext) -> None:
     if not callback.message:
@@ -273,7 +352,6 @@ async def org_menu_set_criteria(callback: types.CallbackQuery, state: FSMContext
         return
     await cmd_set_criteria(callback.message, state)
     await callback.answer()
-
 
 @router.callback_query(F.data == "org_menu_view_results")
 async def org_menu_view_results(callback: types.CallbackQuery) -> None:
@@ -283,7 +361,6 @@ async def org_menu_view_results(callback: types.CallbackQuery) -> None:
     await cmd_view_results(callback.message)
     await callback.answer()
 
-
 @router.callback_query(F.data == "org_menu_export")
 async def org_menu_export(callback: types.CallbackQuery) -> None:
     if not callback.message:
@@ -292,6 +369,66 @@ async def org_menu_export(callback: types.CallbackQuery) -> None:
     await cmd_export(callback.message)
     await callback.answer()
 
+@router.callback_query(F.data.startswith("org_export_campaign_"))
+async def org_export_campaign(callback: types.CallbackQuery) -> None:
+    """Export selected completed campaign to XLSX."""
+    if not callback.message or not callback.from_user:
+        await callback.answer("❌ Ошибка: не удалось обработать запрос", show_alert=True)
+        return
+
+    campaign_id_str = callback.data.removeprefix("org_export_campaign_")
+    try:
+        campaign_id = int(campaign_id_str)
+    except ValueError:
+        await callback.answer("❌ Некорректный идентификатор кампании", show_alert=True)
+        return
+
+    async with session_scope() as session:
+        user = await get_user(tg_id=callback.from_user.id, session=session)
+        if not user or user.role not in (UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER):
+            await callback.answer("❌ Доступ запрещен", show_alert=True)
+            return
+
+        try:
+            campaign, export_rows = await get_campaign_export_rows(campaign_id, session)
+        except ValueError:
+            await callback.answer("⚠️ Можно экспортировать только завершённые кампании", show_alert=True)
+            return
+
+        if campaign is None:
+            await callback.answer("❌ Кампания не найдена", show_alert=True)
+            return
+
+    await callback.answer("⏳ Готовлю XLSX...")
+
+    try:
+        filename, file_buffer, written_rows = xlsx_export_service.build_export_file(
+            campaign_id=campaign.id,
+            campaign_title=campaign.title,
+            rows=_build_export_rows(export_rows),
+            header=EXPORT_HEADERS,
+        )
+        export_file = BufferedInputFile(
+            file=file_buffer.getvalue(),
+            filename=filename,
+        )
+    except Exception as e:
+        logger.exception(f"Unexpected XLSX export error for campaign {campaign.id}: {e}")
+        await callback.message.answer(
+            "❌ Не удалось сформировать XLSX-файл. Повторите позже."
+        )
+        return
+
+    await callback.message.answer_document(
+        document=export_file,
+        caption=(
+            "✅ <b>Экспорт завершён</b>\n\n"
+            f"Кампания: <b>{escape(campaign.title)}</b>\n"
+            f"ID кампании: <code>{campaign.id}</code>\n"
+            f"Выгружено строк: <b>{written_rows}</b>"
+        ),
+        parse_mode="HTML",
+    )
 
 @router.callback_query(F.data == "org_menu_analytics")
 async def org_menu_analytics(callback: types.CallbackQuery) -> None:
@@ -301,7 +438,6 @@ async def org_menu_analytics(callback: types.CallbackQuery) -> None:
     await cmd_analytics(callback.message)
     await callback.answer()
 
-
 @router.callback_query(F.data == "org_menu_banned_users")
 async def org_menu_banned_users(callback: types.CallbackQuery) -> None:
     if not callback.message:
@@ -309,7 +445,6 @@ async def org_menu_banned_users(callback: types.CallbackQuery) -> None:
         return
     await cmd_banned_users(callback.message)
     await callback.answer()
-
 
 # Ban/Unban management handlers
 @router.callback_query(F.data.startswith("org_ban_student_"))
@@ -374,7 +509,6 @@ async def handle_ban_confirmation(callback: types.CallbackQuery, bot: Bot) -> No
     except Exception as e:
         logger.warning(f"Failed to notify banned student {student_id}: {e}")
 
-
 @router.callback_query(F.data.startswith("org_reject_ban_"))
 async def handle_ban_rejection(callback: types.CallbackQuery) -> None:
     """Handle ban request rejection."""
@@ -406,7 +540,6 @@ async def handle_ban_rejection(callback: types.CallbackQuery) -> None:
         callback.message.text + f"\n\n❌ <b>Жалоба отклонена организатором {user.full_name}</b>",
         parse_mode="HTML",
     )
-
 
 @router.message(Command("banned_users"))
 async def cmd_banned_users(message: types.Message) -> None:
@@ -442,7 +575,6 @@ async def cmd_banned_users(message: types.Message) -> None:
         parse_mode="HTML",
         reply_markup=builder.as_markup(),
     )
-
 
 @router.callback_query(F.data.startswith("org_unban_"))
 async def handle_unban(callback: types.CallbackQuery) -> None:

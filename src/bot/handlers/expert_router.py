@@ -1,5 +1,4 @@
 """Expert handler router for review and feedback commands."""
-import os
 from typing import Any
 from aiogram import Bot, Router, types, F
 from aiogram.filters import Command, StateFilter
@@ -7,7 +6,6 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from src.config import config
 from src.db.engine import session_scope
 from src.db.models import UserRole, SubmissionStatus, User, Campaign
 from src.bot.services.user_service import get_user, get_users_by_role
@@ -15,7 +13,6 @@ from src.bot.services.submission_service import get_submission, update_submissio
 from src.bot.services.review_service import create_review, count_pending_submissions, get_submission_pending
 from src.bot.services.campaign_service import get_campaign
 from src.bot.services.queue_service import queue_service, QueueService
-from src.bot.services.sheets_service import SheetsService
 from src.bot.services.notification_service import NotificationService
 from src.bot.utils.logging import logger
 from src.bot.keyboards import (
@@ -34,14 +31,6 @@ from src.bot.keyboards import (
 )
 from src.bot.ui import format_ttl_minutes
 
-
-def _get_sheets_service() -> SheetsService | None:
-    """Get SheetsService instance if configured."""
-    spreadsheet_id = os.getenv("GOOGLE_SHEETS_ID") or config.sheets.spreadsheet_id
-    credentials_path = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE") or config.sheets.credentials_path
-    if spreadsheet_id and credentials_path:
-        return SheetsService(spreadsheet_id, credentials_path)
-    return None
 
 
 def _get_notification_service(bot: Bot) -> NotificationService:
@@ -552,24 +541,6 @@ async def handle_confirm_callback(callback: types.CallbackQuery, state: FSMConte
         campaign = await get_campaign(submission.campaign_id, session)
         author = await get_user(tg_id=submission.author_id, session=session)
         reviewer = await get_user(tg_id=tg_id, session=session)
-
-        # Send to Google Sheets
-        sheets_service = _get_sheets_service()
-        if sheets_service:
-            review_data = {
-                "submission_id": submission.id,
-                "timestamp": submission.updated_at,
-                "campaign": campaign.title if campaign else "",
-                "author": author.full_name if author else "",
-                "group": author.study_group if author else "",
-                "reviewer": reviewer.full_name if reviewer else "",
-                "score": score,
-                "comment": comment_text,
-            }
-            try:
-                await sheets_service.append_review(review_data)
-            except Exception as e:
-                logger.error(f"Failed to send review to Google Sheets: {e}")
 
         # Notify student about review
         if author and not author.is_banned:

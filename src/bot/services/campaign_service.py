@@ -3,8 +3,9 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
-from src.bot.models import Campaign, CampaignType, Review, Submission, SubmissionStatus
+from src.bot.models import Campaign, CampaignType, Review, Submission, SubmissionStatus, User
 from src.bot.utils.logging import logger
 
 class CampaignService:
@@ -213,6 +214,113 @@ class CampaignService:
         )
 
     @staticmethod
+    async def get_completed_campaigns_for_export(session: AsyncSession) -> list[Campaign]:
+        """
+        Get completed campaigns available for export.
+
+        Args:
+            session: Database session
+
+        Returns:
+            List of completed Campaign objects
+        """
+        await CampaignService._deactivate_expired_campaigns(session)
+        result = await session.execute(
+            select(Campaign)
+            .where(Campaign.is_active == False)
+            .order_by(Campaign.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    @staticmethod
+    async def get_campaign_export_rows(
+        campaign_id: int,
+        session: AsyncSession,
+    ) -> tuple[Campaign | None, list[dict]]:
+        """
+        Build detailed export rows for a completed campaign.
+
+        Args:
+            campaign_id: Campaign ID
+            session: Database session
+
+        Returns:
+            Tuple of campaign object and list of export row dictionaries.
+            If campaign is not found, returns (None, []).
+
+        Raises:
+            ValueError: If campaign is still active.
+        """
+        await CampaignService._deactivate_expired_campaigns(session)
+
+        campaign = await CampaignService.get_campaign(campaign_id, session)
+        if campaign is None:
+            return None, []
+
+        if campaign.is_active:
+            raise ValueError("Campaign is still active and cannot be exported")
+
+        reviewer = aliased(User)
+
+        export_result = await session.execute(
+            select(
+                Campaign.id,
+                Campaign.title,
+                Campaign.type,
+                Campaign.is_expert_anon,
+                Submission.id,
+                Submission.status,
+                Submission.created_at,
+                User.tg_id,
+                User.full_name,
+                User.study_group,
+                reviewer.tg_id,
+                reviewer.full_name,
+                Review.score,
+                Review.comment_text,
+                Review.ban_comment,
+                Review.created_at,
+            )
+            .select_from(Submission)
+            .join(Campaign, Submission.campaign_id == Campaign.id)
+            .join(User, Submission.author_id == User.tg_id)
+            .outerjoin(Review, Review.submission_id == Submission.id)
+            .outerjoin(reviewer, Review.reviewer_id == reviewer.tg_id)
+            .where(Campaign.id == campaign_id)
+            .order_by(Submission.created_at.asc(), Review.created_at.asc())
+        )
+
+        rows: list[dict] = []
+        for row in export_result.all():
+            reviewer_tg_id = row[10]
+            reviewer_full_name = row[11]
+            if row[3]:
+                reviewer_tg_id = None
+                reviewer_full_name = None
+
+            rows.append(
+                {
+                    "campaign_id": row[0],
+                    "campaign_title": row[1],
+                    "campaign_type": row[2].value if row[2] else "",
+                    "submission_id": row[4],
+                    "submission_status": row[5].value if row[5] else "",
+                    "submission_created_at": row[6],
+                    "author_tg_id": row[7],
+                    "author_full_name": row[8],
+                    "author_study_group": row[9],
+                    "reviewer_tg_id": reviewer_tg_id,
+                    "reviewer_full_name": reviewer_full_name,
+                    "score": row[12],
+                    "comment_text": row[13],
+                    "ban_comment": row[14],
+                    "review_created_at": row[15],
+                }
+            )
+
+        return campaign, rows
+
+    @staticmethod
     async def get_campaign_results(session: AsyncSession) -> list[dict]:
         """
         Get aggregated campaign results.
@@ -388,6 +496,17 @@ async def toggle_campaign_active(
 ) -> Campaign | None:
     """Toggle campaign active status."""
     return await CampaignService.toggle_campaign_active(campaign_id, is_active, session)
+
+async def get_completed_campaigns_for_export(session: AsyncSession) -> list[Campaign]:
+    """Get completed campaigns available for export."""
+    return await CampaignService.get_completed_campaigns_for_export(session)
+
+async def get_campaign_export_rows(
+    campaign_id: int,
+    session: AsyncSession,
+) -> tuple[Campaign | None, list[dict]]:
+    """Get detailed export rows for a completed campaign."""
+    return await CampaignService.get_campaign_export_rows(campaign_id, session)
 
 async def get_campaign_results(session: AsyncSession) -> list[dict]:
     """Get aggregated campaign results."""

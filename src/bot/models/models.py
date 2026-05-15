@@ -61,6 +61,7 @@ class User(Base):
         nullable=False,
     )
     invite_role: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    last_google_file_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
