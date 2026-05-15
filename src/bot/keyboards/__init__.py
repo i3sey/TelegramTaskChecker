@@ -23,7 +23,6 @@ BTN_VOTE = "🗳 Голосование"
 
 BTN_QUEUE = "📥 Очередь"
 BTN_TAKE = "🟢 Взять работу"
-BTN_RETURN = "↩️ Вернуть"
 BTN_EXPERT_STATS = "📈 Статистика"
 
 BTN_CREATE_CAMPAIGN = "🆕 Создать кампанию"
@@ -33,10 +32,6 @@ BTN_VIEW_RESULTS = "🔎 Результаты"
 BTN_EXPORT = "📤 Экспорт"
 BTN_ANALYTICS = "📊 Аналитика"
 BTN_MORE = "⋯ Ещё"
-BTN_SET_CRITERIA = "⚙️ Критерии"
-BTN_VIEW_RESULTS = "🔎 Результаты"
-BTN_EXPORT = "📤 Экспорт"
-BTN_ANALYTICS = "📊 Аналитика"
 
 BTN_HOURS_12 = "12 часов"
 BTN_HOURS_24 = "24 часа"
@@ -111,7 +106,12 @@ def build_organizer_more_keyboard() -> InlineKeyboardMarkup:
 
 def build_expert_more_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        inline_keyboard=[]
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🟢 Взять следующую", callback_data="expert_take_next"),
+                InlineKeyboardButton(text="📈 Статистика", callback_data="expert_show_stats"),
+            ],
+        ]
     )
 
 
@@ -252,23 +252,4 @@ def get_keyboard_for_role(role: UserRole):
     return _mk_markup([[BTN_ROLE, BTN_PROFILE, BTN_HELP]])
 
 
-def get_keyboard_for_expert_with_return(role: UserRole) -> ReplyKeyboardMarkup:
-    """Return expert keyboard with a temporary return action while reviewing."""
-    if role == UserRole.EXPERT:
-        return _mk_markup(
-            [
-                [BTN_TAKE, BTN_QUEUE, BTN_RETURN, BTN_EXPERT_STATS],
-                [BTN_PROFILE, BTN_ROLE, BTN_HELP],
-            ]
-        )
-    if role == UserRole.EXPERT_ORGANIZER:
-        return _mk_markup(
-            [
-                [BTN_TAKE, BTN_QUEUE, BTN_RETURN, BTN_EXPERT_STATS],
-                [BTN_CREATE_CAMPAIGN, BTN_MY_CAMPAIGNS, BTN_EXPORT],
-                [BTN_VIEW_RESULTS, BTN_ANALYTICS, BTN_SET_CRITERIA],
-                [BTN_PROFILE, BTN_ROLE, BTN_HELP],
-            ]
-        )
-    return get_keyboard_for_role(role)
 

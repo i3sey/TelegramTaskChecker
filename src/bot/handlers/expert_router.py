@@ -21,7 +21,6 @@ from src.bot.utils.logging import logger
 from src.bot.keyboards import (
     BTN_QUEUE,
     BTN_TAKE,
-    BTN_RETURN,
     BTN_EXPERT_STATS,
     BTN_MORE,
     build_expert_more_keyboard,
@@ -32,7 +31,6 @@ from src.bot.keyboards import (
     build_review_confirmation_keyboard,
     build_post_review_keyboard,
     get_keyboard_for_role,
-    get_keyboard_for_expert_with_return,
 )
 from src.bot.ui import format_ttl_minutes
 
@@ -182,7 +180,7 @@ async def send_submission_to_expert(
     await message.answer(
         "⬇️ Введите оценку числом.\n"
         f"Допустимый диапазон: {campaign.min_score}–{campaign.max_score}.",
-        reply_markup=get_keyboard_for_expert_with_return(reviewer_role),
+        reply_markup=get_keyboard_for_role(reviewer_role),
     )
     await message.answer(
         "Выберите оценку кнопкой или введите вручную:",
@@ -390,9 +388,6 @@ async def btn_take(message: types.Message, state: FSMContext) -> None:
     await cmd_take(message, state)
 
 
-@router.message(F.text == BTN_RETURN)
-async def btn_return(message: types.Message, state: FSMContext) -> None:
-    await cmd_return(message, state)
 
 
 @router.message(F.text == BTN_EXPERT_STATS)
