@@ -14,6 +14,8 @@ class CampaignCreationStates(StatesGroup):
     waiting_for_campaign_deadline_days = State()
     waiting_for_anonymous = State()
     waiting_for_submission_format = State()
+    waiting_for_allow_resubmission_before_review = State()
+    waiting_for_allow_resubmission_after_review = State()
 
 
 class SubmissionStates(StatesGroup):

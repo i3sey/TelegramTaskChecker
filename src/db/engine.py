@@ -91,6 +91,20 @@ async def _ensure_schema(conn) -> None:
     )
     await conn.execute(
         text(
+            "ALTER TABLE campaigns "
+            "ADD COLUMN IF NOT EXISTS allow_resubmission_after_review "
+            "BOOLEAN NOT NULL DEFAULT FALSE"
+        )
+    )
+    await conn.execute(
+        text(
+            "ALTER TABLE campaigns "
+            "ADD COLUMN IF NOT EXISTS allow_resubmission_before_review "
+            "BOOLEAN NOT NULL DEFAULT FALSE"
+        )
+    )
+    await conn.execute(
+        text(
             "UPDATE campaigns "
             "SET campaign_deadline_at = created_at + INTERVAL '7 days' "
             "WHERE campaign_deadline_at IS NULL"

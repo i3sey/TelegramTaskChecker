@@ -860,6 +860,74 @@ async def process_submission_format_callback(callback: types.CallbackQuery, stat
     await state.update_data(submission_format=submission_format.value)
 
     await callback.message.edit_text(
+        "♻️ <b>Разрешить замену работы до проверки?</b>\n"
+        "Если выбрать «Да», студент сможет заменить отправленную работу, пока её ещё не проверили.",
+        reply_markup=_build_anonymous_keyboard(),
+        parse_mode="HTML",
+    )
+    await state.set_state(CampaignCreationStates.waiting_for_allow_resubmission_before_review)
+    await callback.answer()
+
+@router.message(StateFilter(CampaignCreationStates.waiting_for_submission_format))
+async def process_submission_format_message(message: types.Message):
+    await message.answer(
+        "📥 <b>Выберите формат сдачи кнопкой ниже:</b>",
+        reply_markup=_build_submission_format_keyboard(),
+        parse_mode="HTML",
+    )
+
+@router.callback_query(
+    StateFilter(CampaignCreationStates.waiting_for_allow_resubmission_before_review)
+)
+async def process_allow_resubmission_before_review_callback(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+):
+    if not callback.data or not callback.data.startswith("cam_anon_"):
+        await callback.answer()
+        return
+
+    allow_resubmission_before_review = callback.data == "cam_anon_yes"
+    await state.update_data(
+        allow_resubmission_before_review=allow_resubmission_before_review
+    )
+
+    await callback.message.edit_text(
+        "🔁 <b>Разрешить пересдачу после проверки?</b>\n"
+        "Если выбрать «Да», студент сможет отправить новую работу после завершения проверки предыдущей.",
+        reply_markup=_build_anonymous_keyboard(),
+        parse_mode="HTML",
+    )
+    await state.set_state(CampaignCreationStates.waiting_for_allow_resubmission_after_review)
+    await callback.answer()
+
+@router.message(
+    StateFilter(CampaignCreationStates.waiting_for_allow_resubmission_before_review)
+)
+async def process_allow_resubmission_before_review_message(message: types.Message):
+    await message.answer(
+        "♻️ <b>Выберите вариант кнопкой ниже:</b>",
+        reply_markup=_build_anonymous_keyboard(),
+        parse_mode="HTML",
+    )
+
+@router.callback_query(
+    StateFilter(CampaignCreationStates.waiting_for_allow_resubmission_after_review)
+)
+async def process_allow_resubmission_after_review_callback(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+):
+    if not callback.data or not callback.data.startswith("cam_anon_"):
+        await callback.answer()
+        return
+
+    allow_resubmission_after_review = callback.data == "cam_anon_yes"
+    await state.update_data(
+        allow_resubmission_after_review=allow_resubmission_after_review
+    )
+
+    await callback.message.edit_text(
         "🔒 <b>Сделать рецензии анонимными?</b>\n"
         "Если выбрать «Да», автор не увидит имя проверяющего.",
         reply_markup=_build_anonymous_keyboard(),
@@ -868,11 +936,13 @@ async def process_submission_format_callback(callback: types.CallbackQuery, stat
     await state.set_state(CampaignCreationStates.waiting_for_anonymous)
     await callback.answer()
 
-@router.message(StateFilter(CampaignCreationStates.waiting_for_submission_format))
-async def process_submission_format_message(message: types.Message):
+@router.message(
+    StateFilter(CampaignCreationStates.waiting_for_allow_resubmission_after_review)
+)
+async def process_allow_resubmission_after_review_message(message: types.Message):
     await message.answer(
-        "📥 <b>Выберите формат сдачи кнопкой ниже:</b>",
-        reply_markup=_build_submission_format_keyboard(),
+        "🔁 <b>Выберите вариант кнопкой ниже:</b>",
+        reply_markup=_build_anonymous_keyboard(),
         parse_mode="HTML",
     )
 
@@ -906,6 +976,14 @@ async def process_campaign_anonymous_callback(callback: types.CallbackQuery, sta
                 submission_format=SubmissionFormat(
                     data.get("submission_format", SubmissionFormat.DOCUMENT.value)
                 ),
+                allow_resubmission_after_review=data.get(
+                    "allow_resubmission_after_review",
+                    False,
+                ),
+                allow_resubmission_before_review=data.get(
+                    "allow_resubmission_before_review",
+                    False,
+                ),
                 session=session,
             )
 
@@ -935,7 +1013,9 @@ async def process_campaign_anonymous_callback(callback: types.CallbackQuery, sta
                 f"⏱ Дедлайн проверки эксперта: {format_ttl_minutes(campaign.ttl_minutes)}\n"
                 f"📅 Дедлайн сдачи работ: {campaign_deadline_at.astimezone().strftime('%d.%m.%Y %H:%M')}\n"
                 f"🔒 Анонимность: {'Да' if is_anon else 'Нет'}\n"
-                f"📥 Формат сдачи: {_submission_format_label(campaign.submission_format)}"
+                f"📥 Формат сдачи: {_submission_format_label(campaign.submission_format)}\n"
+                f"♻️ Замена до проверки: {'Да' if campaign.allow_resubmission_before_review else 'Нет'}\n"
+                f"🔁 Пересдача после проверки: {'Да' if campaign.allow_resubmission_after_review else 'Нет'}"
                 f"{extra_lines}"
                 f"{_format_invite_block(bot_username, student_code, expert_code)}",
                 parse_mode="HTML",
@@ -980,6 +1060,17 @@ async def process_anonymous_message(message: types.Message, state: FSMContext):
                 voting_type=data.get("voting_type"),
                 organizer_id=tg_id,
                 session=session,
+                submission_format=SubmissionFormat(
+                    data.get("submission_format", SubmissionFormat.DOCUMENT.value)
+                ),
+                allow_resubmission_after_review=data.get(
+                    "allow_resubmission_after_review",
+                    False,
+                ),
+                allow_resubmission_before_review=data.get(
+                    "allow_resubmission_before_review",
+                    False,
+                ),
             )
 
             bot_username = (await message.bot.get_me()).username
@@ -1005,7 +1096,10 @@ async def process_anonymous_message(message: types.Message, state: FSMContext):
                 f"{score_line}"
                 f"⏱ Дедлайн проверки эксперта: {format_ttl_minutes(campaign.ttl_minutes)}\n"
                 f"📅 Дедлайн сдачи работ: {campaign_deadline_at.astimezone().strftime('%d.%m.%Y %H:%M')}\n"
-                f"🔒 Анонимность: {'Да' if is_anon else 'Нет'}"
+                f"🔒 Анонимность: {'Да' if is_anon else 'Нет'}\n"
+                f"📥 Формат сдачи: {_submission_format_label(campaign.submission_format)}\n"
+                f"♻️ Замена до проверки: {'Да' if campaign.allow_resubmission_before_review else 'Нет'}\n"
+                f"🔁 Пересдача после проверки: {'Да' if campaign.allow_resubmission_after_review else 'Нет'}"
                 f"{extra_lines}"
                 f"{_format_invite_block(bot_username, student_code, expert_code)}",
                 parse_mode="HTML",
@@ -1051,6 +1145,15 @@ async def cmd_campaigns(message: types.Message):
                 text += f"   👥 Проверок на участника: {campaign.p2p_reviews_required}\n"
             if campaign.type == CampaignType.VOTING:
                 text += f"   🗳 Тип голосования: {voting_type_label(campaign.voting_type)}\n"
+            text += f"   📥 Формат сдачи: {_submission_format_label(campaign.submission_format)}\n"
+            text += (
+                f"   ♻️ Замена до проверки: "
+                f"{'Да' if campaign.allow_resubmission_before_review else 'Нет'}\n"
+            )
+            text += (
+                f"   🔁 Пересдача после проверки: "
+                f"{'Да' if campaign.allow_resubmission_after_review else 'Нет'}\n"
+            )
             text += f"   ⏱ Дедлайн проверки эксперта: {format_ttl_minutes(campaign.ttl_minutes)}\n"
             text += f"   📅 Дедлайн сдачи: {deadline_text} ({_format_time_left(deadline)})\n\n"
 
@@ -1117,6 +1220,15 @@ async def cmd_my_campaigns(message: types.Message):
                 text += f"   👥 Проверок на участника: {campaign.p2p_reviews_required}\n"
             if campaign.type == CampaignType.VOTING:
                 text += f"   🗳 Тип голосования: {voting_type_label(campaign.voting_type)}\n"
+            text += f"   📥 Формат сдачи: {_submission_format_label(campaign.submission_format)}\n"
+            text += (
+                f"   ♻️ Замена до проверки: "
+                f"{'Да' if campaign.allow_resubmission_before_review else 'Нет'}\n"
+            )
+            text += (
+                f"   🔁 Пересдача после проверки: "
+                f"{'Да' if campaign.allow_resubmission_after_review else 'Нет'}\n"
+            )
             text += f"   ⏱ Дедлайн проверки эксперта: {format_ttl_minutes(campaign.ttl_minutes)}\n"
             text += f"   📅 Дедлайн сдачи: {deadline_text} ({_format_time_left(deadline)})\n"
             text += f"   📝 Сдано: {submission_counts.get(campaign.id, 0)} работ\n\n"
@@ -1424,7 +1536,7 @@ async def process_submission_file(message: types.Message, state: FSMContext):
         build_public_link_error_message,
         validate_public_link,
     )
-    from src.bot.services.submission_service import check_user_has_submission
+    from src.bot.services.submission_service import check_submission_availability
     from src.bot.utils.validators import validate_submission_message
 
     tg_id = message.from_user.id
@@ -1450,14 +1562,11 @@ async def process_submission_file(message: types.Message, state: FSMContext):
                 await state.clear()
                 return
 
-            has_submission = await check_user_has_submission(
-                campaign_id, tg_id, session
+            action, existing_submission, error_message = await check_submission_availability(
+                campaign, tg_id, session
             )
-            if has_submission:
-                await message.answer(
-                    "❌ Вы уже сдавали работу в эту кампанию.\n"
-                    "Можно сдать только одну работу на кампанию."
-                )
+            if action == "forbid":
+                await message.answer(error_message or "❌ Отправка работы недоступна.")
                 return
 
             is_valid, error_msg, payload = validate_submission_message(campaign, message)
@@ -1484,6 +1593,8 @@ async def process_submission_file(message: types.Message, state: FSMContext):
             await state.update_data(
                 submission_payload=payload,
                 submission_preview_campaign_title=campaign.title,
+                submission_action=action,
+                existing_submission_id=existing_submission.id if existing_submission else None,
             )
             await message.answer(
                 _submission_confirmation_text(campaign, payload),
@@ -1536,8 +1647,9 @@ async def submission_retry(callback: types.CallbackQuery, state: FSMContext):
 async def submission_confirm(callback: types.CallbackQuery, state: FSMContext):
     """Create submission only after explicit confirmation."""
     from src.bot.services.submission_service import (
+        check_submission_availability,
         create_submission,
-        check_user_has_submission,
+        replace_submission_content,
     )
 
     if not callback.message:
@@ -1548,6 +1660,8 @@ async def submission_confirm(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
     campaign_id = data.get("campaign_id")
     payload = data.get("submission_payload")
+    submission_action = data.get("submission_action")
+    existing_submission_id = data.get("existing_submission_id")
 
     if not campaign_id or not payload:
         await callback.message.answer("❌ Данные отправки потеряны. Начните заново через /submit.")
@@ -1564,43 +1678,71 @@ async def submission_confirm(callback: types.CallbackQuery, state: FSMContext):
                 await callback.answer()
                 return
 
-            has_submission = await check_user_has_submission(
-                campaign_id, tg_id, session
+            action, existing_submission, error_message = await check_submission_availability(
+                campaign, tg_id, session
             )
-            if has_submission:
+            if action == "forbid":
                 await callback.message.answer(
-                    "❌ Вы уже сдавали работу в эту кампанию.\n"
-                    "Можно сдать только одну работу на кампанию."
+                    error_message or "❌ Отправка работы недоступна."
                 )
                 await state.clear()
                 await callback.answer()
                 return
 
-            submission = await create_submission(
-                campaign_id=campaign_id,
-                author_id=tg_id,
-                submission_type=payload["submission_type"],
-                file_id=payload.get("file_id"),
-                file_name=payload.get("file_name"),
-                mime_type=payload.get("mime_type"),
-                text_content=payload.get("text_content"),
-                external_url=payload.get("external_url"),
-                session=session,
-            )
+            if submission_action == "replace":
+                if (
+                    action != "replace"
+                    or existing_submission is None
+                    or existing_submission_id != existing_submission.id
+                ):
+                    await callback.message.answer(
+                        "❌ Нельзя заменить работу: её статус уже изменился. "
+                        "Начните отправку заново."
+                    )
+                    await state.clear()
+                    await callback.answer()
+                    return
+
+                submission = await replace_submission_content(
+                    submission=existing_submission,
+                    submission_type=payload["submission_type"],
+                    file_id=payload.get("file_id"),
+                    file_name=payload.get("file_name"),
+                    mime_type=payload.get("mime_type"),
+                    text_content=payload.get("text_content"),
+                    external_url=payload.get("external_url"),
+                    session=session,
+                )
+                success_title = "✅ <b>Работа успешно заменена!</b>"
+                success_hint = "Что дальше: дождитесь, когда обновлённую работу возьмут на проверку."
+            else:
+                submission = await create_submission(
+                    campaign_id=campaign_id,
+                    author_id=tg_id,
+                    submission_type=payload["submission_type"],
+                    file_id=payload.get("file_id"),
+                    file_name=payload.get("file_name"),
+                    mime_type=payload.get("mime_type"),
+                    text_content=payload.get("text_content"),
+                    external_url=payload.get("external_url"),
+                    session=session,
+                )
+                success_title = "✅ <b>Работа успешно загружена!</b>"
+                success_hint = "Что дальше: дождитесь, когда работу возьмут на проверку."
 
             logger.info(
-                f"Submission created: id={submission.id}, "
+                f"Submission saved: id={submission.id}, "
                 f"campaign={campaign_id}, author={tg_id}, "
-                f"type={submission.submission_type.value}"
+                f"type={submission.submission_type.value}, action={submission_action or action}"
             )
 
             await callback.message.answer(
-                "✅ <b>Работа успешно загружена!</b>\n\n"
+                f"{success_title}\n\n"
                 f"📋 Кампания: <b>{campaign.title}</b>\n"
                 f"{_submission_success_details(submission)}\n"
                 f"🆔 Работа: <code>{submission.id}</code>\n"
                 f"📌 Статус: 🟡 <b>Ожидает проверки</b>\n"
-                "Что дальше: дождитесь, когда работу возьмут на проверку.",
+                f"{success_hint}",
                 parse_mode="HTML",
                 reply_markup=build_post_submission_keyboard(),
             )

@@ -140,6 +140,8 @@ class CampaignService:
         session: AsyncSession,
         submission_format: SubmissionFormat = SubmissionFormat.DOCUMENT,
         allowed_extensions: str | None = None,
+        allow_resubmission_after_review: bool = False,
+        allow_resubmission_before_review: bool = False,
     ) -> Campaign:
         """
         Create a new campaign.
@@ -169,6 +171,8 @@ class CampaignService:
             voting_type=voting_type,
             submission_format=submission_format,
             allowed_extensions=allowed_extensions,
+            allow_resubmission_after_review=allow_resubmission_after_review,
+            allow_resubmission_before_review=allow_resubmission_before_review,
         )
         session.add(campaign)
         await session.flush()
@@ -487,6 +491,8 @@ async def create_campaign(
     session: AsyncSession,
     submission_format: SubmissionFormat = SubmissionFormat.DOCUMENT,
     allowed_extensions: str | None = None,
+    allow_resubmission_after_review: bool = False,
+    allow_resubmission_before_review: bool = False,
 ) -> Campaign:
     """Create a new campaign."""
     return await CampaignService.create_campaign(
@@ -503,6 +509,8 @@ async def create_campaign(
         session,
         submission_format,
         allowed_extensions,
+        allow_resubmission_after_review,
+        allow_resubmission_before_review,
     )
 
 async def update_campaign(

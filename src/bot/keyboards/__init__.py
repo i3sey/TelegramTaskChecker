@@ -41,8 +41,8 @@ BTN_SCORE_50 = "50"
 BTN_SCORE_100 = "100"
 BTN_SCORE_200 = "200"
 BTN_SCORE_500 = "500"
-BTN_ANON_YES = "✅ Да, анонимно"
-BTN_ANON_NO = "❌ Нет, открыто"
+BTN_ANON_YES = "✅ Да"
+BTN_ANON_NO = "❌ Нет"
 
 def _mk_markup(rows: list[list[str]]) -> ReplyKeyboardMarkup:
     keyboard = [[KeyboardButton(text=label) for label in row] for row in rows]

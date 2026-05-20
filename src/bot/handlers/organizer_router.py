@@ -221,6 +221,9 @@ def _format_results_text(results: list[dict]) -> str:
         blocks.append(
             f"\n<b>{escape(campaign.title)}</b>\n"
             f"📌 Тип: {campaign.type.value}\n"
+            f"📥 Формат сдачи: {campaign.submission_format.value}\n"
+            f"♻️ Замена до проверки: {'Да' if campaign.allow_resubmission_before_review else 'Нет'}\n"
+            f"🔁 Пересдача после проверки: {'Да' if campaign.allow_resubmission_after_review else 'Нет'}\n"
             f"📝 Работ: {item['total_submissions']}\n"
             f"✅ Проверено: {item['reviewed_submissions']}\n"
             f"⭐ Средняя оценка: {item['avg_score']:.2f}\n"

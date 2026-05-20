@@ -150,6 +150,16 @@ class Campaign(Base):
         nullable=False,
     )
     allowed_extensions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    allow_resubmission_after_review: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+    allow_resubmission_before_review: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

@@ -71,25 +71,33 @@ class NotificationService:
         """Apply delay between messages to avoid flood limit."""
         await asyncio.sleep(self.DEFAULT_DELAY_SECONDS)
 
-    async def notify_user(self, tg_id: int, message: str) -> bool:
+    async def notify_user(
+        self,
+        tg_id: int,
+        message: str,
+        *,
+        use_rate_limit: bool = True,
+    ) -> bool:
         """
         Send notification to user. Returns success status.
 
         Args:
             tg_id: Telegram user ID
             message: Message text to send
+            use_rate_limit: Whether to apply per-user rate limiting
 
         Returns:
             True if message sent successfully, False otherwise
         """
         try:
             # Check rate limit
-            can_send = await self._check_rate_limit(tg_id)
-            if not can_send:
-                logger.warning(
-                    f"Rate limited: not sending notification to user {tg_id}"
-                )
-                return False
+            if use_rate_limit:
+                can_send = await self._check_rate_limit(tg_id)
+                if not can_send:
+                    logger.warning(
+                        f"Rate limited: not sending notification to user {tg_id}"
+                    )
+                    return False
 
             # Apply delay to avoid flood
             await self._apply_delay()
@@ -144,7 +152,11 @@ class NotificationService:
         message_parts.append("\nПодробности в боте.")
         message = "".join(message_parts)
 
-        success = await self.notify_user(student_tg_id, message)
+        success = await self.notify_user(
+            student_tg_id,
+            message,
+            use_rate_limit=False,
+        )
         if not success:
             logger.warning(
                 f"Could not notify student {student_tg_id} about review"

@@ -110,32 +110,64 @@ def get_confirm_keyboard() -> InlineKeyboardMarkup:
     return build_review_confirmation_keyboard()
 
 
-async def check_expert_role(message: types.Message) -> bool:
-    """Check if the user has EXPERT role."""
-    tg_id = message.from_user.id
+async def _check_expert_access(
+    tg_id: int,
+    *,
+    answer_message: types.Message | None = None,
+    answer_callback: types.CallbackQuery | None = None,
+) -> bool:
+    """Check if the user has expert access and respond in the proper context."""
     async with session_scope() as session:
         user = await get_user(tg_id=tg_id, session=session)
         if not user:
-            await message.answer("❌ Вы не зарегистрированы. Используйте /start.")
+            if answer_callback:
+                await answer_callback.answer(
+                    "❌ Вы не зарегистрированы. Используйте /start.",
+                    show_alert=True,
+                )
+            elif answer_message:
+                await answer_message.answer("❌ Вы не зарегистрированы. Используйте /start.")
             return False
         if user.role not in (UserRole.EXPERT, UserRole.EXPERT_ORGANIZER):
-            await message.answer("⛔ Эта команда доступна только для экспертов.")
+            if answer_callback:
+                await answer_callback.answer(
+                    "⛔ Эта команда доступна только для экспертов.",
+                    show_alert=True,
+                )
+            elif answer_message:
+                await answer_message.answer("⛔ Эта команда доступна только для экспертов.")
             return False
         if user.role == UserRole.EXPERT and (
             not user.registered_by_code or user.invite_role != "expert"
         ):
-            extra_hint = ""
-            await message.answer(
-                "⛔ Для роли эксперта нужен инвайт. "
-                "Откройте ссылку приглашения"
-                f"{extra_hint}",
-                parse_mode="HTML",
-            )
+            if answer_callback:
+                await answer_callback.answer(
+                    "⛔ Для роли эксперта нужен инвайт.",
+                    show_alert=True,
+                )
+            elif answer_message:
+                extra_hint = ""
+                await answer_message.answer(
+                    "⛔ Для роли эксперта нужен инвайт. "
+                    "Откройте ссылку приглашения"
+                    f"{extra_hint}",
+                    parse_mode="HTML",
+                )
             return False
         if user.is_banned:
-            await message.answer("⛔ Ваш аккаунт заблокирован.")
+            if answer_callback:
+                await answer_callback.answer("⛔ Ваш аккаунт заблокирован.", show_alert=True)
+            elif answer_message:
+                await answer_message.answer("⛔ Ваш аккаунт заблокирован.")
             return False
     return True
+
+async def check_expert_role(message: types.Message) -> bool:
+    """Check if the user has EXPERT role."""
+    return await _check_expert_access(
+        message.from_user.id,
+        answer_message=message,
+    )
 
 
 async def _send_submission_content(
@@ -261,9 +293,11 @@ async def _try_assign_submission_to_expert(
     message: types.Message,
     state: FSMContext,
     submission_id: int,
+    *,
+    expert_tg_id: int | None = None,
 ) -> bool:
     """Lock and assign a pending submission to the current expert."""
-    tg_id = message.from_user.id
+    tg_id = expert_tg_id or message.from_user.id
 
     async with session_scope() as session:
         submission = await get_submission(submission_id, session)
@@ -394,12 +428,23 @@ async def cmd_queue(message: types.Message) -> None:
 
 
 @router.message(Command("take"))
-async def cmd_take(message: types.Message, state: FSMContext) -> None:
+async def cmd_take(
+    message: types.Message,
+    state: FSMContext,
+    expert_tg_id: int | None = None,
+) -> None:
     """Handle /take command - show next submission and ask for confirmation."""
-    if not await check_expert_role(message):
-        return
+    tg_id = expert_tg_id or message.from_user.id
 
-    tg_id = message.from_user.id
+    if expert_tg_id is None:
+        if not await check_expert_role(message):
+            return
+    else:
+        if not await _check_expert_access(
+            tg_id,
+            answer_message=message,
+        ):
+            return
 
     logger.info(f"Expert {tg_id} trying to take a submission")
 
@@ -506,9 +551,12 @@ async def expert_take_next(callback: types.CallbackQuery, state: FSMContext) -> 
     if not callback.message:
         await callback.answer("Ошибка: не удалось получить сообщение", show_alert=True)
         return
-    if not await check_expert_role(callback.message):
+    if not await _check_expert_access(
+        callback.from_user.id,
+        answer_callback=callback,
+    ):
         return
-    await cmd_take(callback.message, state)
+    await cmd_take(callback.message, state, expert_tg_id=callback.from_user.id)
     await callback.answer()
 
 
@@ -517,7 +565,10 @@ async def expert_confirm_take(callback: types.CallbackQuery, state: FSMContext) 
     if not callback.message:
         await callback.answer("Ошибка: не удалось получить сообщение", show_alert=True)
         return
-    if not await check_expert_role(callback.message):
+    if not await _check_expert_access(
+        callback.from_user.id,
+        answer_callback=callback,
+    ):
         return
 
     submission_id_text = callback.data.removeprefix("expert_confirm_take:")
@@ -538,14 +589,22 @@ async def expert_confirm_take(callback: types.CallbackQuery, state: FSMContext) 
         pending_take_campaign_id=None,
     )
     await callback.answer("Берём работу на проверку...")
-    await _try_assign_submission_to_expert(callback.message, state, submission_id)
+    await _try_assign_submission_to_expert(
+        callback.message,
+        state,
+        submission_id,
+        expert_tg_id=callback.from_user.id,
+    )
 
 @router.callback_query(F.data == "expert_cancel_take")
 async def expert_cancel_take(callback: types.CallbackQuery, state: FSMContext) -> None:
     if not callback.message:
         await callback.answer("Ошибка: не удалось получить сообщение", show_alert=True)
         return
-    if not await check_expert_role(callback.message):
+    if not await _check_expert_access(
+        callback.from_user.id,
+        answer_callback=callback,
+    ):
         return
 
     await state.update_data(
@@ -563,7 +622,10 @@ async def expert_show_stats(callback: types.CallbackQuery) -> None:
     if not callback.message:
         await callback.answer("Ошибка: не удалось получить сообщение", show_alert=True)
         return
-    if not await check_expert_role(callback.message):
+    if not await _check_expert_access(
+        callback.from_user.id,
+        answer_callback=callback,
+    ):
         return
     await cmd_expert_stats(callback.message)
     await callback.answer()
