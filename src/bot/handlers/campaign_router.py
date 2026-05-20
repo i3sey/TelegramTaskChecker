@@ -49,7 +49,7 @@ from src.bot.keyboards import (
     build_post_campaign_created_keyboard,
     build_submission_confirmation_keyboard,
     build_finish_campaign_confirmation_keyboard,
-    get_keyboard_for_role,
+    get_keyboard_for_user,
 )
 from src.bot.ui import campaign_type_label, format_ttl_minutes, submission_status_meta, voting_type_label
 
@@ -1751,7 +1751,7 @@ async def submission_confirm(callback: types.CallbackQuery, state: FSMContext):
             if user:
                 await callback.message.answer(
                     "Главное меню:",
-                    reply_markup=get_keyboard_for_role(user.role),
+                    reply_markup=await get_keyboard_for_user(user),
                 )
 
         except Exception as e:

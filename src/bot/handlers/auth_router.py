@@ -22,7 +22,7 @@ from src.bot.services.invite_service import (
 )
 from src.bot.utils.logging import logger
 from src.bot.keyboards import (
-    get_keyboard_for_role,
+    get_keyboard_for_user,
     build_full_name_confirmation_keyboard,
     BTN_PROFILE,
     BTN_HELP,
@@ -158,7 +158,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
                 "❓ /help - Помощь"
                 f"{extra_notice}",
                 parse_mode="HTML",
-                reply_markup=get_keyboard_for_role(existing_user.role),
+                reply_markup=await get_keyboard_for_user(existing_user),
             )
 
         else:
@@ -284,7 +284,7 @@ async def reg_confirm_full_name(callback: types.CallbackQuery, state: FSMContext
             if invite_ok and invite_code:
                 invite = await get_invite_by_code(invite_code, session)
 
-            await create_user(
+            user = await create_user(
                 tg_id=callback.from_user.id,
                 full_name=full_name,
                 study_group=None,
@@ -309,7 +309,7 @@ async def reg_confirm_full_name(callback: types.CallbackQuery, state: FSMContext
             f"{access_note}\n\n"
             "Используйте /help для списка команд.",
             parse_mode="HTML",
-            reply_markup=get_keyboard_for_role(role),
+            reply_markup=await get_keyboard_for_user(user),
         )
     except Exception as e:
         logger.error(f"Failed to create user {callback.from_user.id}: {e}")
@@ -396,7 +396,7 @@ async def process_study_group(message: types.Message, state: FSMContext):
             f"{access_note}\n\n"
             "Теперь вы можете выбрать кампанию и загрузить работу.",
             parse_mode="HTML",
-            reply_markup=get_keyboard_for_role(UserRole.STUDENT),
+            reply_markup=await get_keyboard_for_user(user),
         )
         if invite_ok:
             from src.bot.handlers.campaign_router import cmd_submit
@@ -556,7 +556,7 @@ async def process_role_change(callback: types.CallbackQuery, state: FSMContext):
     )
     await callback.message.answer(
         "Главное меню обновлено.",
-        reply_markup=get_keyboard_for_role(user.role),
+        reply_markup=await get_keyboard_for_user(user),
     )
     await callback.answer()
 

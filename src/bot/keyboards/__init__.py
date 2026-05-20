@@ -7,7 +7,11 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 
-from src.db.models import UserRole
+from src.db.engine import session_scope
+from src.db.models import CampaignType, User, UserRole
+from src.bot.services.campaign_service import get_active_campaigns
+from src.bot.services.review_service import count_reviewer_reviews_for_campaign
+from src.bot.services.submission_service import get_user_submissions
 
 BTN_HELP = "❓ Помощь"
 BTN_PROFILE = "👤 Профиль"
@@ -15,7 +19,6 @@ BTN_ROLE = "🎭 Роль"
 
 BTN_SUBMIT = "📤 Загрузить работу"
 BTN_MY_SUBMISSIONS = "📎 Мои работы"
-BTN_STATUS = "📊 Статус"
 BTN_CAMPAIGNS = "📋 Кампании"
 BTN_P2P_REVIEW = "👥 Проверить работы"
 BTN_VOTE = "🗳 Голосование"
@@ -168,7 +171,6 @@ def build_post_submission_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(text=BTN_MY_SUBMISSIONS, callback_data="menu_my_submissions"),
-                InlineKeyboardButton(text=BTN_STATUS, callback_data="menu_status"),
             ]
         ]
     )
@@ -266,15 +268,55 @@ def get_confirm_keyboard() -> InlineKeyboardMarkup:
     """Alias for build_review_confirmation_keyboard for compatibility."""
     return build_review_confirmation_keyboard()
 
+def _get_student_keyboard(show_p2p_review: bool = False) -> ReplyKeyboardMarkup:
+    rows = [[BTN_SUBMIT, BTN_MY_SUBMISSIONS]]
+
+    if show_p2p_review:
+        rows.append([BTN_P2P_REVIEW])
+
+    rows.append([BTN_CAMPAIGNS, BTN_PROFILE, BTN_ROLE, BTN_HELP])
+    return _mk_markup(rows)
+
+async def student_has_pending_p2p_reviews(user: User) -> bool:
+    """Return True if student still has required P2P reviews in any active campaign."""
+    if user.role != UserRole.STUDENT:
+        return False
+
+    async with session_scope() as session:
+        campaigns = await get_active_campaigns(session)
+        submissions = await get_user_submissions(user.tg_id, session)
+
+        submitted_campaign_ids = {submission.campaign_id for submission in submissions}
+        p2p_campaigns = [
+            campaign
+            for campaign in campaigns
+            if campaign.type == CampaignType.P2P and campaign.id in submitted_campaign_ids
+        ]
+
+        for campaign in p2p_campaigns:
+            done = await count_reviewer_reviews_for_campaign(
+                user.tg_id,
+                campaign.id,
+                session,
+            )
+            if done < campaign.p2p_reviews_required:
+                return True
+
+    return False
+
+async def get_keyboard_for_user(user: User) -> ReplyKeyboardMarkup:
+    """Return a user-specific main reply keyboard with dynamic student actions."""
+    if user.role == UserRole.STUDENT:
+        return _get_student_keyboard(
+            show_p2p_review=await student_has_pending_p2p_reviews(user)
+        )
+
+    return get_keyboard_for_role(user.role)
+
 def get_keyboard_for_role(role: UserRole):
     """Return a role-specific main reply keyboard."""
     if role == UserRole.STUDENT:
-        return _mk_markup(
-            [
-                [BTN_SUBMIT, BTN_MY_SUBMISSIONS, BTN_STATUS],
-                [BTN_CAMPAIGNS, BTN_PROFILE, BTN_ROLE, BTN_HELP],
-            ]
-        )
+        return _get_student_keyboard(show_p2p_review=False)
     if role == UserRole.EXPERT:
         return _mk_markup(
             [

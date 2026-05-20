@@ -37,6 +37,11 @@ from src.bot.keyboards import (
     get_keyboard_for_role,
 )
 from src.bot.ui import format_ttl_minutes
+from src.bot.handlers.common_review_flow import (
+    format_comment_saved_text,
+    format_review_saved_summary,
+    format_score_saved_text,
+)
 
 
 
@@ -673,9 +678,12 @@ async def process_score_input(message: types.Message, state: FSMContext) -> None
     await state.update_data(score=score)
     await state.set_state(ExpertReviewState.waiting_for_comment)
     await message.answer(
-        f"✅ <b>Оценка сохранена: {score}</b>\n\n"
-        f"Диапазон оценок: {campaign.min_score}–{campaign.max_score}\n\n"
-        "Что дальше?",
+        format_score_saved_text(
+            score=score,
+            min_score=campaign.min_score,
+            max_score=campaign.max_score,
+            next_step_text="Что дальше?",
+        ),
         parse_mode="HTML",
         reply_markup=build_comment_decision_keyboard(),
     )
@@ -717,9 +725,12 @@ async def process_quick_score(callback: types.CallbackQuery, state: FSMContext) 
     await state.set_state(ExpertReviewState.waiting_for_comment)
     await callback.answer(f"Оценка {score} сохранена")
     await callback.message.answer(
-        f"✅ <b>Оценка сохранена: {score}</b>\n\n"
-        f"Диапазон оценок: {campaign.min_score}–{campaign.max_score}\n\n"
-        "Что дальше?",
+        format_score_saved_text(
+            score=score,
+            min_score=campaign.min_score,
+            max_score=campaign.max_score,
+            next_step_text="Что дальше?",
+        ),
         parse_mode="HTML",
         reply_markup=build_comment_decision_keyboard(),
     )
@@ -884,9 +895,10 @@ async def process_comment(message: types.Message, state: FSMContext) -> None:
     )
 
     await message.answer(
-        "💬 <b>Комментарий сохранён.</b>\n\n"
-        f"Текст: {comment_text}\n\n"
-        "Выберите действие с работой:",
+        format_comment_saved_text(
+            comment_text=comment_text,
+            next_step_text="Выберите действие с работой:",
+        ),
         parse_mode="HTML",
         reply_markup=build_comment_final_keyboard()
     )

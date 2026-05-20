@@ -19,7 +19,7 @@ from src.bot.keyboards import (
     BTN_SET_CRITERIA,
     BTN_VIEW_RESULTS,
     build_organizer_more_keyboard,
-    get_keyboard_for_role,
+    get_keyboard_for_user,
 )
 from src.bot.services.campaign_service import (
     get_campaign_export_rows,
@@ -629,7 +629,7 @@ async def handle_unban(callback: types.CallbackQuery) -> None:
         await callback.message.edit_text(text, parse_mode="HTML")
     
     # Try to notify the unbanned student
-    keyboard = get_keyboard_for_role(student.role) if student else None
+    keyboard = await get_keyboard_for_user(student) if student else None
     
     try:
         await callback.bot.send_message(

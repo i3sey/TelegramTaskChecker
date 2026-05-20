@@ -2,7 +2,7 @@
 from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.bot.models import Review, Submission, SubmissionStatus
+from src.bot.models import Campaign, CampaignType, Review, Submission, SubmissionStatus
 from src.bot.utils.logging import logger
 
 
@@ -210,7 +210,13 @@ class ReviewService:
         """
         result = await session.execute(
             select(Submission)
-            .where(Submission.status == SubmissionStatus.UPLOADED)
+            .join(Campaign, Submission.campaign_id == Campaign.id)
+            .where(
+                and_(
+                    Submission.status == SubmissionStatus.UPLOADED,
+                    Campaign.type == CampaignType.EXPERT,
+                )
+            )
             .order_by(Submission.created_at.asc())
             .limit(limit)
         )
@@ -228,10 +234,16 @@ class ReviewService:
             Number of pending submissions
         """
         result = await session.execute(
-            select(Submission)
-            .where(Submission.status == SubmissionStatus.UPLOADED)
+            select(func.count(Submission.id))
+            .join(Campaign, Submission.campaign_id == Campaign.id)
+            .where(
+                and_(
+                    Submission.status == SubmissionStatus.UPLOADED,
+                    Campaign.type == CampaignType.EXPERT,
+                )
+            )
         )
-        return len(list(result.scalars().all()))
+        return int(result.scalar_one() or 0)
 
 
 # Module-level convenience functions

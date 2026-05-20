@@ -12,7 +12,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import and_, exists, func, select
 
 from src.db.engine import session_scope
-from src.db.models import CampaignType, Review, Submission, SubmissionFormat, UserRole
+from src.db.models import CampaignType, Review, Submission, UserRole
 from src.bot.services.queue_service import queue_service
 from src.bot.services.campaign_service import get_active_campaigns, get_campaign
 from src.bot.services.review_service import (
@@ -28,6 +28,13 @@ from src.bot.services.user_service import get_user
 from src.bot.keyboards import BTN_P2P_REVIEW, BTN_VOTE
 from src.bot.ui import format_ttl_minutes, voting_type_label
 from src.bot.utils.logging import logger
+from src.bot.handlers.common_review_flow import (
+    build_confirm_cancel_keyboard,
+    format_comment_saved_text,
+    format_review_saved_summary,
+    format_score_saved_text,
+    send_submission_content,
+)
 
 
 router = Router()
@@ -71,11 +78,9 @@ def _build_p2p_comment_keyboard() -> types.InlineKeyboardMarkup:
 
 
 def _build_p2p_confirm_keyboard() -> types.InlineKeyboardMarkup:
-    return types.InlineKeyboardMarkup(
-        inline_keyboard=[
-            [types.InlineKeyboardButton(text="✅ Подтвердить", callback_data="p2p_confirm")],
-            [types.InlineKeyboardButton(text="↩️ Отменить", callback_data="p2p_cancel")],
-        ]
+    return build_confirm_cancel_keyboard(
+        confirm_callback="p2p_confirm",
+        cancel_callback="p2p_cancel",
     )
 
 
@@ -235,64 +240,6 @@ def _campaign_deadline(campaign) -> datetime | None:
     return created_at + timedelta(minutes=ttl_minutes)
 
 
-async def _send_submission_content(
-    message: types.Message,
-    submission: Submission,
-    caption: str,
-) -> None:
-    submission_type = submission.submission_type or SubmissionFormat.DOCUMENT
-
-    if submission_type == SubmissionFormat.TEXT:
-        text_body = (submission.text_content or "").strip() or "—"
-        await message.answer(
-            f"{caption}\n\n📝 <b>Текст работы:</b>\n<blockquote>{text_body}</blockquote>",
-            parse_mode="HTML",
-        )
-        return
-
-    if submission_type == SubmissionFormat.LINK:
-        await message.answer(
-            f"{caption}\n\n🔗 <b>Ссылка:</b>\n{submission.external_url or '—'}",
-            parse_mode="HTML",
-            disable_web_page_preview=True,
-        )
-        return
-
-    try:
-        if submission_type == SubmissionFormat.PHOTO and submission.file_id:
-            await message.answer_photo(
-                photo=submission.file_id,
-                caption=caption,
-                parse_mode="HTML",
-            )
-            return
-
-        if submission.file_id:
-            await message.answer_document(
-                document=submission.file_id,
-                caption=caption,
-                parse_mode="HTML",
-            )
-            return
-
-        await message.answer(
-            caption + "\n\n⚠️ У работы отсутствует вложение для отправки.",
-            parse_mode="HTML",
-        )
-    except Exception as exc:
-        logger.warning(
-            f"Failed to send submission {submission.id} "
-            f"of type {submission_type.value}: {exc}"
-        )
-        fallback = caption + "\n\n⚠️ Вложение не удалось отправить."
-        if submission_type == SubmissionFormat.LINK and submission.external_url:
-            fallback += f"\n🔗 Ссылка: {submission.external_url}"
-        elif submission_type == SubmissionFormat.TEXT and submission.text_content:
-            fallback += f"\n📝 Текст:\n<blockquote>{submission.text_content}</blockquote>"
-        elif submission.file_name:
-            fallback += f"\n📄 Файл: <b>{submission.file_name}</b>"
-        await message.answer(fallback, parse_mode="HTML")
-
 async def _send_p2p_submission(
     message: types.Message,
     submission: Submission,
@@ -305,7 +252,7 @@ async def _send_p2p_submission(
         f"⏳ Время на проверку: <b>{format_ttl_minutes(campaign.ttl_minutes)}</b>\n\n"
         f"Оценивание: от <b>{campaign.min_score}</b> до <b>{campaign.max_score}</b>."
     )
-    await _send_submission_content(message, submission, caption)
+    await send_submission_content(message, submission, caption)
     await message.answer(
         f"⬇️ Введите оценку числом ({campaign.min_score}–{campaign.max_score})."
     )
@@ -322,7 +269,7 @@ async def _send_voting_submission(
         f"🆔 Работа: <code>{submission.id}</code>\n"
         f"Тип: <b>{voting_type_label(campaign.voting_type)}</b>"
     )
-    await _send_submission_content(message, submission, caption)
+    await send_submission_content(message, submission, caption)
 
 
 @router.message(Command("p2p"))
@@ -484,8 +431,12 @@ async def process_p2p_score(message: types.Message, state: FSMContext) -> None:
     await state.update_data(score=score)
     await state.set_state(P2PReviewStates.waiting_for_comment)
     await message.answer(
-        f"📝 <b>Оценка сохранена: {score}</b>\n\n"
-        "Теперь отправьте комментарий. Если он не нужен, нажмите кнопку ниже.",
+        format_score_saved_text(
+            score=score,
+            min_score=campaign.min_score,
+            max_score=campaign.max_score,
+            next_step_text="Теперь отправьте комментарий. Если он не нужен, нажмите кнопку ниже.",
+        ),
         parse_mode="HTML",
         reply_markup=_build_p2p_comment_keyboard(),
     )
@@ -504,9 +455,10 @@ async def process_p2p_comment(message: types.Message, state: FSMContext) -> None
     await state.update_data(comment_text=comment_text)
     await state.set_state(P2PReviewStates.waiting_for_confirm)
     await message.answer(
-        "💬 <b>Комментарий сохранён.</b>\n\n"
-        f"Текст: {comment_text}\n\n"
-        "Нажмите «Подтвердить», чтобы сохранить рецензию.",
+        format_comment_saved_text(
+            comment_text=comment_text,
+            next_step_text="Нажмите «Подтвердить», чтобы сохранить рецензию.",
+        ),
         parse_mode="HTML",
         reply_markup=_build_p2p_confirm_keyboard(),
     )
@@ -629,12 +581,13 @@ async def p2p_confirm(callback: types.CallbackQuery, state: FSMContext) -> None:
         )
 
         await callback.message.answer(
-            f"{completion_emoji} <b>Рецензия сохранена!</b>\n\n"
-            f"🆔 Работа: <code>{submission_id}</code>\n"
-            f"⭐ Оценка: <b>{score}</b>\n"
-            f"💬 Комментарий: <b>{comment_text if comment_text else 'Нет комментария'}</b>\n\n"
-            f"📈 Ваш прогресс: <b>{progress_text}</b>\n"
-            f"{submission_status}",
+            f"{completion_emoji} "
+            + format_review_saved_summary(
+                submission_id=submission_id,
+                score=score,
+                comment_summary=comment_text if comment_text else "Нет комментария",
+                extra_text=f"📈 Ваш прогресс: <b>{progress_text}</b>\n{submission_status}",
+            ),
             parse_mode="HTML",
             reply_markup=_build_p2p_continue_keyboard(campaign_id) if not user_complete else None,
         )
