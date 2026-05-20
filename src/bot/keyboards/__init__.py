@@ -181,6 +181,27 @@ def build_comment_final_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def build_voice_comment_action_keyboard() -> InlineKeyboardMarkup:
+    """Build keyboard for expert voice comment handling."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🎤 Отправить как голосовое", callback_data="voice_comment_send_raw")],
+            [InlineKeyboardButton(text="📝 Распознать в текст", callback_data="voice_comment_transcribe")],
+            [InlineKeyboardButton(text="↩️ Ввести заново", callback_data="voice_comment_retry")],
+        ]
+    )
+
+def build_transcribed_comment_keyboard() -> InlineKeyboardMarkup:
+    """Build keyboard after transcription result is shown."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Использовать этот текст", callback_data="voice_comment_use_transcription")],
+            [InlineKeyboardButton(text="✏️ Отредактировать текст", callback_data="voice_comment_edit_transcription")],
+            [InlineKeyboardButton(text="🎤 Отправить как голосовое", callback_data="voice_comment_send_raw")],
+            [InlineKeyboardButton(text="↩️ Ввести заново", callback_data="voice_comment_retry")],
+        ]
+    )
+
 def build_ban_comment_keyboard() -> InlineKeyboardMarkup:
     """Build keyboard for entering ban reason comment."""
     return InlineKeyboardMarkup(

@@ -14,6 +14,10 @@ from src.bot.services.review_service import create_review, count_pending_submiss
 from src.bot.services.campaign_service import get_campaign
 from src.bot.services.queue_service import queue_service, QueueService
 from src.bot.services.notification_service import NotificationService
+from src.bot.services.voice_transcription_service import (
+    VoiceTranscriptionError,
+    VoiceTranscriptionService,
+)
 from src.bot.utils.logging import logger
 from src.bot.keyboards import (
     BTN_QUEUE,
@@ -27,6 +31,8 @@ from src.bot.keyboards import (
     build_ban_comment_keyboard,
     build_review_confirmation_keyboard,
     build_post_review_keyboard,
+    build_voice_comment_action_keyboard,
+    build_transcribed_comment_keyboard,
     get_keyboard_for_role,
 )
 from src.bot.ui import format_ttl_minutes
@@ -49,6 +55,8 @@ class ExpertReviewState(StatesGroup):
     reviewing_submission = State()
     waiting_for_score = State()
     waiting_for_comment = State()
+    waiting_for_voice_comment_action = State()
+    waiting_for_transcribed_comment_edit = State()
     waiting_for_ban_reason = State()
 
 
@@ -558,7 +566,9 @@ async def handle_confirm_callback(callback: types.CallbackQuery, state: FSMConte
     data = await state.get_data()
     submission_id = data.get("submission_id")
     score = data.get("score")
-    comment_text = data.get("comment_text", "")
+    comment_text = data.get("comment_text")
+    voice_file_id = data.get("voice_file_id")
+    comment_mode = data.get("comment_mode")
 
     if not submission_id or score is None:
         await callback.answer("Сначала выберите оценку", show_alert=True)
@@ -567,7 +577,15 @@ async def handle_confirm_callback(callback: types.CallbackQuery, state: FSMConte
     if comment_text == "пропустить":
         comment_text = None
 
-    logger.info(f"Expert {tg_id} submitting review for submission {submission_id}: score={score}")
+    if comment_mode == "voice_raw":
+        comment_text = None
+    else:
+        voice_file_id = None
+
+    logger.info(
+        f"Expert {tg_id} submitting review for submission {submission_id}: "
+        f"score={score}, comment_mode={comment_mode}"
+    )
 
     # Unlock from Redis
     await queue_service.unlock_submission(submission_id)
@@ -579,6 +597,7 @@ async def handle_confirm_callback(callback: types.CallbackQuery, state: FSMConte
             reviewer_id=tg_id,
             score=score,
             comment_text=comment_text,
+            voice_file_id=voice_file_id,
             session=session,
         )
         await update_submission_status(submission_id, SubmissionStatus.REVIEWED, session)
@@ -600,6 +619,7 @@ async def handle_confirm_callback(callback: types.CallbackQuery, state: FSMConte
                     comment=comment_text,
                     reviewer_name=reviewer.full_name if reviewer else None,
                     is_expert_anon=campaign.is_expert_anon if campaign else True,
+                    voice_file_id=voice_file_id,
                 )
             except Exception as e:
                 logger.error(f"Failed to notify student: {e}")
@@ -610,12 +630,14 @@ async def handle_confirm_callback(callback: types.CallbackQuery, state: FSMConte
         user = await get_user(tg_id=tg_id, session=session)
         reply_markup = get_keyboard_for_role(user.role) if user else None
 
+    comment_summary = "Голосовой комментарий" if voice_file_id else (comment_text or "Без комментария")
+
     await callback.answer("Рецензия сохранена!")
     await message.answer(
         f"✅ <b>Рецензия сохранена!</b>\n\n"
         f"🆔 Работа: <code>{submission_id}</code>\n"
         f"⭐ Оценка: <b>{score}</b>\n"
-        f"💬 Комментарий: <b>{comment_text or 'Без комментария'}</b>\n\n"
+        f"💬 Комментарий: <b>{comment_summary}</b>\n\n"
         "Можно сразу взять следующую работу или открыть статистику.",
         parse_mode="HTML",
         reply_markup=build_post_review_keyboard(),
@@ -658,16 +680,38 @@ async def handle_cancel_callback(callback: types.CallbackQuery, state: FSMContex
 @router.message(StateFilter(ExpertReviewState.waiting_for_comment))
 async def process_comment(message: types.Message, state: FSMContext) -> None:
     """Process expert's comment input."""
+    if message.voice:
+        voice_file_id = message.voice.file_id
+        await state.update_data(
+            comment_text=None,
+            voice_file_id=voice_file_id,
+            voice_transcription_text=None,
+            comment_mode=None,
+        )
+        await state.set_state(ExpertReviewState.waiting_for_voice_comment_action)
+        await message.answer(
+            "🎤 <b>Голосовой комментарий получен.</b>\n\n"
+            "Выберите, как обработать комментарий:",
+            parse_mode="HTML",
+            reply_markup=build_voice_comment_action_keyboard(),
+        )
+        return
+
     if not message.text:
         await message.answer(
-            "⚠️ Сейчас можно отправить только текстовый комментарий.\n"
-            "Либо напишите комментарий, либо пропустите его.",
+            "⚠️ Сейчас можно отправить текстовый комментарий или голосовое сообщение.\n"
+            "Либо отправьте комментарий, либо пропустите его.",
             reply_markup=build_comment_skip_keyboard(),
         )
         return
 
     comment_text = message.text.strip()
-    await state.update_data(comment_text=comment_text)
+    await state.update_data(
+        comment_text=comment_text,
+        voice_file_id=None,
+        voice_transcription_text=None,
+        comment_mode="text",
+    )
 
     await message.answer(
         "💬 <b>Комментарий сохранён.</b>\n\n"
@@ -684,11 +728,150 @@ async def handle_score_proceed_comment(callback: types.CallbackQuery, state: FSM
     await callback.answer()
     await callback.message.answer(
         "📝 <b>Напишите комментарий к работе</b>\n\n"
+        "Можно отправить текст или голосовое сообщение.\n"
         "Комментарий должен содержать ваше мнение о работе, замечания и рекомендации.",
         parse_mode="HTML",
         reply_markup=build_comment_skip_keyboard(),
     )
     await state.set_state(ExpertReviewState.waiting_for_comment)
+
+@router.callback_query(F.data == "voice_comment_send_raw")
+async def handle_voice_comment_send_raw(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Use previously uploaded voice comment as-is."""
+    data = await state.get_data()
+    voice_file_id = data.get("voice_file_id")
+    if not voice_file_id:
+        await callback.answer("Голосовое сообщение не найдено", show_alert=True)
+        return
+
+    await state.update_data(comment_text=None, comment_mode="voice_raw")
+    await state.set_state(ExpertReviewState.waiting_for_comment)
+    await callback.answer("Будет отправлено голосовое сообщение")
+    await callback.message.answer(
+        "🎤 <b>Будет отправлен голосовой комментарий.</b>\n\n"
+        "Выберите действие с работой:",
+        parse_mode="HTML",
+        reply_markup=build_comment_final_keyboard(),
+    )
+
+@router.callback_query(F.data == "voice_comment_transcribe")
+async def handle_voice_comment_transcribe(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    bot: Bot,
+) -> None:
+    """Transcribe expert voice comment with OpenAI."""
+    data = await state.get_data()
+    voice_file_id = data.get("voice_file_id")
+    if not voice_file_id:
+        await callback.answer("Голосовое сообщение не найдено", show_alert=True)
+        return
+
+    await callback.answer()
+    await callback.message.answer("🧠 Распознаю голосовое сообщение, подождите...")
+
+    service = VoiceTranscriptionService(bot)
+    try:
+        transcription_text = await service.transcribe_voice(voice_file_id)
+    except VoiceTranscriptionError as e:
+        await callback.message.answer(
+            f"⚠️ {e}\n\n"
+            "Вы можете отправить голосовое как есть или ввести комментарий вручную.",
+            reply_markup=build_voice_comment_action_keyboard(),
+        )
+        return
+
+    await state.update_data(
+        voice_transcription_text=transcription_text,
+        comment_text=transcription_text,
+        comment_mode="voice_transcribed",
+    )
+    await state.set_state(ExpertReviewState.waiting_for_voice_comment_action)
+    await callback.message.answer(
+        "📝 <b>Распознанный текст:</b>\n\n"
+        f"{transcription_text}\n\n"
+        "Можно использовать этот текст или прислать исправленный вариант следующим сообщением.",
+        parse_mode="HTML",
+        reply_markup=build_transcribed_comment_keyboard(),
+    )
+
+@router.callback_query(F.data == "voice_comment_use_transcription")
+async def handle_voice_comment_use_transcription(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+) -> None:
+    """Confirm current transcription text without manual editing."""
+    data = await state.get_data()
+    transcription_text = data.get("voice_transcription_text")
+    if not transcription_text:
+        await callback.answer("Сначала выполните распознавание", show_alert=True)
+        return
+
+    await state.update_data(comment_text=transcription_text, comment_mode="voice_transcribed")
+    await state.set_state(ExpertReviewState.waiting_for_comment)
+    await callback.answer("Распознанный текст сохранён")
+    await callback.message.answer(
+        "💬 <b>Текстовый комментарий сохранён.</b>\n\n"
+        f"Текст: {transcription_text}\n\n"
+        "Выберите действие с работой:",
+        parse_mode="HTML",
+        reply_markup=build_comment_final_keyboard(),
+    )
+
+@router.callback_query(F.data == "voice_comment_edit_transcription")
+async def handle_voice_comment_edit_transcription(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+) -> None:
+    """Ask expert to send edited transcription text."""
+    data = await state.get_data()
+    transcription_text = data.get("voice_transcription_text")
+    if not transcription_text:
+        await callback.answer("Сначала выполните распознавание", show_alert=True)
+        return
+
+    await state.set_state(ExpertReviewState.waiting_for_transcribed_comment_edit)
+    await callback.answer()
+    await callback.message.answer(
+        "✏️ <b>Отредактируйте распознанный текст</b>\n\n"
+        "Отправьте исправленный комментарий обычным текстовым сообщением.\n\n"
+        f"Текущий вариант:\n{transcription_text}",
+        parse_mode="HTML",
+    )
+
+@router.callback_query(F.data == "voice_comment_retry")
+async def handle_voice_comment_retry(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Return expert to comment input step."""
+    await state.update_data(
+        comment_text=None,
+        voice_file_id=None,
+        voice_transcription_text=None,
+        comment_mode=None,
+    )
+    await state.set_state(ExpertReviewState.waiting_for_comment)
+    await callback.answer()
+    await callback.message.answer(
+        "↩️ Отправьте комментарий заново: можно текстом или голосовым сообщением.",
+        reply_markup=build_comment_skip_keyboard(),
+    )
+
+@router.message(StateFilter(ExpertReviewState.waiting_for_transcribed_comment_edit))
+async def process_transcribed_comment_edit(message: types.Message, state: FSMContext) -> None:
+    """Process edited transcription text from expert."""
+    if not message.text:
+        await message.answer("⚠️ Пришлите исправленный комментарий обычным текстом.")
+        return
+
+    comment_text = message.text.strip()
+    await state.update_data(comment_text=comment_text, comment_mode="voice_transcribed")
+    await state.set_state(ExpertReviewState.waiting_for_comment)
+    await message.answer(
+        "💬 <b>Исправленный комментарий сохранён.</b>\n\n"
+        f"Текст: {comment_text}\n\n"
+        "Выберите действие с работой:",
+        parse_mode="HTML",
+        reply_markup=build_comment_final_keyboard(),
+    )
 
 
 @router.callback_query(F.data == "score_proceed_ban")
@@ -705,7 +888,12 @@ async def handle_score_proceed_ban(callback: types.CallbackQuery, state: FSMCont
 
 @router.callback_query(F.data == "comment_skip")
 async def handle_comment_skip(callback: types.CallbackQuery, state: FSMContext) -> None:
-    await state.update_data(comment_text=None)
+    await state.update_data(
+        comment_text=None,
+        voice_file_id=None,
+        voice_transcription_text=None,
+        comment_mode="text",
+    )
     await callback.answer("Комментарий будет пропущен")
     await callback.message.answer(
         "💬 Комментарий будет пропущен.\n"

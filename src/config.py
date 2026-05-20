@@ -26,12 +26,20 @@ class RedisConfig:
     url: str
 
 @dataclass
+class GroqConfig:
+    """Groq transcription API configuration."""
+    api_key: str
+    base_url: str | None = None
+    transcription_model: str = "whisper-large-v3"
+
+@dataclass
 class Config:
     """Main application configuration."""
     DEBUG: bool
     bot: BotConfig
     db: DatabaseConfig
     redis: RedisConfig
+    groq: GroqConfig
     admin_ids: set[int]
 
 def _get_database_url() -> str:
@@ -86,6 +94,12 @@ config = Config(
     ),
     redis=RedisConfig(
         url=_get_redis_url(),
+    ),
+    groq=GroqConfig(
+        api_key=os.getenv("GROQ_API_KEY") or os.getenv("LLM_API_KEY", ""),
+        base_url=os.getenv("GROQ_BASE_URL") or os.getenv("LLM_BASE_URL") or None,
+        transcription_model=os.getenv("GROQ_TRANSCRIPTION_MODEL")
+        or os.getenv("LLM_TRANSCRIPTION_MODEL", "whisper-large-v3"),
     ),
     admin_ids=_get_admin_ids(),
 )

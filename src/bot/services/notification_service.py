@@ -111,6 +111,7 @@ class NotificationService:
         comment: str | None,
         reviewer_name: str | None = None,
         is_expert_anon: bool = True,
+        voice_file_id: str | None = None,
     ) -> None:
         """
         Notify student about completed review.
@@ -120,6 +121,7 @@ class NotificationService:
             campaign_title: Title of the campaign
             score: Review score received
             comment: Optional review comment
+            voice_file_id: Optional Telegram file_id for voice comment
         """
         safe_campaign = html.escape(campaign_title or "")
         safe_comment = html.escape(comment) if comment else None
@@ -136,6 +138,8 @@ class NotificationService:
 
         if safe_comment:
             message_parts.append(f"Комментарий: <i>{safe_comment}</i>\n")
+        elif voice_file_id:
+            message_parts.append("Комментарий: <i>голосовое сообщение</i>\n")
 
         message_parts.append("\nПодробности в боте.")
         message = "".join(message_parts)
@@ -145,6 +149,21 @@ class NotificationService:
             logger.warning(
                 f"Could not notify student {student_tg_id} about review"
             )
+            return
+
+        if voice_file_id:
+            try:
+                await self._apply_delay()
+                await self.bot.send_voice(
+                    chat_id=student_tg_id,
+                    voice=voice_file_id,
+                    caption="🎤 Голосовой комментарий от проверяющего",
+                )
+                logger.info(f"Voice review notification sent to user {student_tg_id}")
+            except Exception as e:
+                logger.error(
+                    f"Failed to send voice review notification to {student_tg_id}: {e}"
+                )
 
     async def notify_expert_new_work(
         self,
