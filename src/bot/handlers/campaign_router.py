@@ -1,5 +1,6 @@
 """Campaign management router for organizers."""
 from datetime import datetime, timedelta, timezone
+from html import escape
 from aiogram import Router, types, F
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -46,6 +47,8 @@ from src.bot.keyboards import (
     build_campaign_anonymous_keyboard,
     build_post_submission_keyboard,
     build_post_campaign_created_keyboard,
+    build_submission_confirmation_keyboard,
+    build_finish_campaign_confirmation_keyboard,
     get_keyboard_for_role,
 )
 from src.bot.ui import campaign_type_label, format_ttl_minutes, submission_status_meta, voting_type_label
@@ -224,6 +227,42 @@ def _submission_error_text(campaign: Campaign) -> str:
         SubmissionFormat.LINK: "❌ Пожалуйста, отправьте корректную ссылку.",
     }
     return errors.get(campaign.submission_format, "❌ Отправьте работу в требуемом формате.")
+
+def _submission_preview_details(campaign: Campaign, payload: dict) -> str:
+    submission_type = payload.get("submission_type", campaign.submission_format)
+
+    if submission_type == SubmissionFormat.TEXT:
+        preview = (payload.get("text_content") or "").strip()
+        if len(preview) > 300:
+            preview = f"{preview[:297]}..."
+        return (
+            "📝 Формат: <b>Текст</b>\n"
+            f"📄 Содержимое: <blockquote>{escape(preview)}</blockquote>"
+        )
+
+    if submission_type == SubmissionFormat.LINK:
+        return (
+            "🔗 Формат: <b>Ссылка</b>\n"
+            f"🌐 URL: <code>{escape(payload.get('external_url') or '-')}</code>"
+        )
+
+    if submission_type == SubmissionFormat.PHOTO:
+        return "🖼 Формат: <b>Фото</b>"
+
+    if submission_type == SubmissionFormat.PHOTO_DOCUMENT:
+        file_name = escape(payload.get("file_name") or "image")
+        return f"🖼📎 Формат: <b>Фото документом</b>\n📄 Файл: <b>{file_name}</b>"
+
+    file_name = escape(payload.get("file_name") or "document")
+    return f"📄 Формат: <b>Документ</b>\n📄 Файл: <b>{file_name}</b>"
+
+def _submission_confirmation_text(campaign: Campaign, payload: dict) -> str:
+    return (
+        "📤 <b>Проверьте работу перед отправкой</b>\n\n"
+        f"📋 Кампания: <b>{escape(campaign.title)}</b>\n"
+        f"{_submission_preview_details(campaign, payload)}\n\n"
+        "Если всё верно, подтвердите отправку."
+    )
 
 def _build_min_score_keyboard():
     return _build_inline_keyboard([
@@ -1185,6 +1224,54 @@ async def finish_campaign(callback: types.CallbackQuery) -> None:
             await callback.answer("Кампания не найдена", show_alert=True)
             return
 
+        if not campaign.is_active:
+            stats = await _campaign_stats(campaign_id, session)
+            await callback.answer("Кампания уже завершена", show_alert=True)
+            await callback.message.answer(
+                "ℹ️ <b>Кампания уже завершена.</b>\n\n"
+                f"📋 {campaign.title}\n"
+                f"📝 Работ: <b>{stats['total_submissions']}</b>\n"
+                f"✅ Проверено работ: <b>{stats['reviewed_submissions']}</b>\n"
+                f"💬 Всего рецензий: <b>{stats['total_reviews']}</b>\n"
+                f"⭐ Средний балл: <b>{stats['avg_score']:.1f}</b>",
+                parse_mode="HTML",
+            )
+            return
+
+        await callback.answer()
+        await callback.message.answer(
+            "⚠️ <b>Подтвердите завершение кампании</b>\n\n"
+            f"📋 Кампания: <b>{campaign.title}</b>\n"
+            "После подтверждения кампания будет закрыта для новых работ.",
+            parse_mode="HTML",
+            reply_markup=build_finish_campaign_confirmation_keyboard(campaign.id),
+        )
+
+@router.callback_query(F.data.startswith("finish_campaign_confirm:"))
+async def finish_campaign_confirm(callback: types.CallbackQuery) -> None:
+    if not callback.message:
+        await callback.answer("❌ Ошибка: не удалось получить сообщение", show_alert=True)
+        return
+
+    campaign_id_text = callback.data.removeprefix("finish_campaign_confirm:")
+    if not campaign_id_text.isdigit():
+        await callback.answer("Некорректный ID кампании", show_alert=True)
+        return
+
+    campaign_id = int(campaign_id_text)
+    tg_id = callback.from_user.id
+
+    async with session_scope() as session:
+        user = await get_user(tg_id=tg_id, session=session)
+        if not user or user.role not in (UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER):
+            await callback.answer("Доступно только организаторам", show_alert=True)
+            return
+
+        campaign = await get_campaign(campaign_id, session)
+        if not campaign:
+            await callback.answer("Кампания не найдена", show_alert=True)
+            return
+
         campaign_title = campaign.title
 
         if not campaign.is_active:
@@ -1215,6 +1302,10 @@ async def finish_campaign(callback: types.CallbackQuery) -> None:
         f"⭐ Средний балл: <b>{stats['avg_score']:.1f}</b>",
         parse_mode="HTML",
     )
+
+@router.callback_query(F.data.startswith("finish_campaign_cancel:"))
+async def finish_campaign_cancel(callback: types.CallbackQuery) -> None:
+    await callback.answer("Завершение кампании отменено")
 
 
 # Reply-keyboard handlers (buttons under input)
@@ -1328,15 +1419,12 @@ async def process_campaign_selection(callback: types.CallbackQuery, state: FSMCo
 
 @router.message(StateFilter(SubmissionStates.waiting_for_submission))
 async def process_submission_file(message: types.Message, state: FSMContext):
-    """Process uploaded submission according to campaign format."""
+    """Validate uploaded submission and ask for confirmation."""
     from src.bot.services.public_link_validator import (
         build_public_link_error_message,
         validate_public_link,
     )
-    from src.bot.services.submission_service import (
-        create_submission,
-        check_user_has_submission,
-    )
+    from src.bot.services.submission_service import check_user_has_submission
     from src.bot.utils.validators import validate_submission_message
 
     tg_id = message.from_user.id
@@ -1393,6 +1481,101 @@ async def process_submission_file(message: types.Message, state: FSMContext):
 
                 payload["external_url"] = public_link_result.normalized_url
 
+            await state.update_data(
+                submission_payload=payload,
+                submission_preview_campaign_title=campaign.title,
+            )
+            await message.answer(
+                _submission_confirmation_text(campaign, payload),
+                parse_mode="HTML",
+                reply_markup=build_submission_confirmation_keyboard(),
+            )
+            await state.set_state(SubmissionStates.confirming_submission)
+
+        except Exception as e:
+            logger.error(f"Failed to prepare submission confirmation: {e}")
+            await message.answer(
+                "❌ Произошла ошибка при подготовке работы к отправке."
+            )
+
+@router.callback_query(StateFilter(SubmissionStates.confirming_submission), F.data == "submission_retry")
+async def submission_retry(callback: types.CallbackQuery, state: FSMContext):
+    """Return user to submission input step without saving work."""
+    if not callback.message:
+        await callback.answer()
+        return
+
+    data = await state.get_data()
+    campaign_id = data.get("campaign_id")
+
+    if not campaign_id:
+        await callback.message.answer("❌ Ошибка: кампания не выбрана.")
+        await state.clear()
+        await callback.answer()
+        return
+
+    async with session_scope() as session:
+        campaign = await get_campaign(campaign_id, session)
+
+    if not campaign:
+        await callback.message.answer("❌ Кампания не найдена.")
+        await state.clear()
+        await callback.answer()
+        return
+
+    await state.update_data(submission_payload=None)
+    await state.set_state(SubmissionStates.waiting_for_submission)
+    await callback.message.answer(
+        "✏️ Отправка отменена. Пришлите работу заново.\n\n"
+        f"{_submission_prompt_text(campaign)}",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+@router.callback_query(StateFilter(SubmissionStates.confirming_submission), F.data == "submission_confirm")
+async def submission_confirm(callback: types.CallbackQuery, state: FSMContext):
+    """Create submission only after explicit confirmation."""
+    from src.bot.services.submission_service import (
+        create_submission,
+        check_user_has_submission,
+    )
+
+    if not callback.message:
+        await callback.answer()
+        return
+
+    tg_id = callback.from_user.id
+    data = await state.get_data()
+    campaign_id = data.get("campaign_id")
+    payload = data.get("submission_payload")
+
+    if not campaign_id or not payload:
+        await callback.message.answer("❌ Данные отправки потеряны. Начните заново через /submit.")
+        await state.clear()
+        await callback.answer()
+        return
+
+    async with session_scope() as session:
+        try:
+            campaign = await get_campaign(campaign_id, session)
+            if not campaign:
+                await callback.message.answer("❌ Кампания не найдена.")
+                await state.clear()
+                await callback.answer()
+                return
+
+            has_submission = await check_user_has_submission(
+                campaign_id, tg_id, session
+            )
+            if has_submission:
+                await callback.message.answer(
+                    "❌ Вы уже сдавали работу в эту кампанию.\n"
+                    "Можно сдать только одну работу на кампанию."
+                )
+                await state.clear()
+                await callback.answer()
+                return
+
             submission = await create_submission(
                 campaign_id=campaign_id,
                 author_id=tg_id,
@@ -1411,7 +1594,7 @@ async def process_submission_file(message: types.Message, state: FSMContext):
                 f"type={submission.submission_type.value}"
             )
 
-            await message.answer(
+            await callback.message.answer(
                 "✅ <b>Работа успешно загружена!</b>\n\n"
                 f"📋 Кампания: <b>{campaign.title}</b>\n"
                 f"{_submission_success_details(submission)}\n"
@@ -1419,22 +1602,25 @@ async def process_submission_file(message: types.Message, state: FSMContext):
                 f"📌 Статус: 🟡 <b>Ожидает проверки</b>\n"
                 "Что дальше: дождитесь, когда работу возьмут на проверку.",
                 parse_mode="HTML",
+                reply_markup=build_post_submission_keyboard(),
             )
 
             user = await get_user(tg_id=tg_id, session=session)
             if user:
-                await message.answer(
+                await callback.message.answer(
                     "Главное меню:",
                     reply_markup=get_keyboard_for_role(user.role),
                 )
 
         except Exception as e:
-            logger.error(f"Failed to create submission: {e}")
-            await message.answer(
+            logger.error(f"Failed to create submission after confirmation: {e}")
+            await callback.message.answer(
                 "❌ Произошла ошибка при сохранении работы."
             )
+        finally:
+            await state.clear()
 
-    await state.clear()
+    await callback.answer()
 
 
 @router.message(Command("my_submissions"))

@@ -33,6 +33,7 @@ from src.bot.keyboards import (
     build_post_review_keyboard,
     build_voice_comment_action_keyboard,
     build_transcribed_comment_keyboard,
+    build_take_submission_confirmation_keyboard,
     get_keyboard_for_role,
 )
 from src.bot.ui import format_ttl_minutes
@@ -232,6 +233,90 @@ async def send_submission_to_expert(
     )
 
 
+async def _preview_submission_for_take(
+    message: types.Message,
+    submission,
+    campaign,
+    author: User,
+) -> None:
+    """Show submission preview before expert confirms taking it."""
+    caption = (
+        f"📝 <b>Работа найдена</b>\n\n"
+        f"📋 Кампания: <b>{campaign.title}</b>\n"
+        f"👤 Студент: <b>{author.full_name}</b>\n"
+        f"📚 Группа: <b>{author.study_group or 'Не указана'}</b>\n"
+        f"🆔 Работа: <code>{submission.id}</code>\n"
+        f"🕒 Загружена: <code>{submission.created_at.strftime('%d.%m.%Y %H:%M')}</code>\n"
+        f"⏳ Время на проверку после взятия: <b>{format_ttl_minutes(campaign.ttl_minutes)}</b>\n\n"
+        f"Оценивание: от <b>{campaign.min_score}</b> до <b>{campaign.max_score}</b>.\n"
+        "Подтвердите, если хотите взять эту работу на проверку."
+    )
+    await _send_submission_content(message, submission, caption)
+    await message.answer(
+        "Нажмите кнопку ниже, чтобы взять работу, или отмените действие.",
+        reply_markup=build_take_submission_confirmation_keyboard(submission.id),
+    )
+
+async def _try_assign_submission_to_expert(
+    message: types.Message,
+    state: FSMContext,
+    submission_id: int,
+) -> bool:
+    """Lock and assign a pending submission to the current expert."""
+    tg_id = message.from_user.id
+
+    async with session_scope() as session:
+        submission = await get_submission(submission_id, session)
+        if not submission:
+            await message.answer("⚠️ Работа уже недоступна. Нажмите /take ещё раз.")
+            return False
+
+        campaign = await get_campaign(submission.campaign_id, session)
+        author = await get_user(tg_id=submission.author_id, session=session)
+        if not campaign or not author:
+            await message.answer("⚠️ Не удалось получить данные работы. Нажмите /take ещё раз.")
+            return False
+
+        if submission.status != SubmissionStatus.UPLOADED:
+            await message.answer(
+                "⚠️ Эту работу уже взял другой эксперт или она больше недоступна.\n"
+                "Нажмите /take, чтобы получить следующую.",
+                parse_mode="HTML",
+            )
+            return False
+
+        locked = await queue_service.lock_submission(
+            submission_id=submission.id,
+            expert_id=tg_id,
+            ttl_minutes=campaign.ttl_minutes,
+        )
+        if not locked:
+            await message.answer(
+                "⚠️ Эту работу только что взял другой эксперт.\n"
+                "Нажмите /take, чтобы получить следующую.",
+                parse_mode="HTML",
+            )
+            return False
+
+        await update_submission_status(
+            submission.id,
+            SubmissionStatus.IN_REVIEW,
+            session
+        )
+
+    await state.set_state(ExpertReviewState.reviewing_submission)
+    await state.update_data(
+        submission_id=submission.id,
+        campaign_id=submission.campaign_id,
+        ttl_minutes=campaign.ttl_minutes,
+    )
+
+    logger.info(f"Expert {tg_id} took submission {submission.id} (TTL: {campaign.ttl_minutes}m)")
+
+    await send_submission_to_expert(message, submission, campaign, author)
+    await state.set_state(ExpertReviewState.waiting_for_score)
+    return True
+
 async def _deliver_current_submission(
     message: types.Message,
     state: FSMContext,
@@ -310,7 +395,7 @@ async def cmd_queue(message: types.Message) -> None:
 
 @router.message(Command("take"))
 async def cmd_take(message: types.Message, state: FSMContext) -> None:
-    """Handle /take command - get next submission from queue with Redis lock."""
+    """Handle /take command - show next submission and ask for confirmation."""
     if not await check_expert_role(message):
         return
 
@@ -336,43 +421,20 @@ async def cmd_take(message: types.Message, state: FSMContext) -> None:
         submissions = await get_submission_pending(session, limit=10)
 
         for submission in submissions:
-            # Get campaign for TTL
             campaign = await get_campaign(submission.campaign_id, session)
             if not campaign:
                 continue
 
-            # Try to lock with Redis
-            locked = await queue_service.lock_submission(
-                submission_id=submission.id,
-                expert_id=tg_id,
-                ttl_minutes=campaign.ttl_minutes,
+            author = await get_user(tg_id=submission.author_id, session=session)
+            if not author:
+                continue
+
+            await state.update_data(
+                pending_take_submission_id=submission.id,
+                pending_take_campaign_id=submission.campaign_id,
             )
-
-            if locked:
-                # Update DB status
-                await update_submission_status(
-                    submission.id,
-                    SubmissionStatus.IN_REVIEW,
-                    session
-                )
-
-                # Get author
-                author = await get_user(tg_id=submission.author_id, session=session)
-
-                # Update FSM state
-                await state.set_state(ExpertReviewState.reviewing_submission)
-                await state.update_data(
-                    submission_id=submission.id,
-                    campaign_id=submission.campaign_id,
-                    ttl_minutes=campaign.ttl_minutes,
-                )
-
-                logger.info(f"Expert {tg_id} took submission {submission.id} (TTL: {campaign.ttl_minutes}m)")
-
-                # Send to expert
-                await send_submission_to_expert(message, submission, campaign, author)
-                await state.set_state(ExpertReviewState.waiting_for_score)
-                return
+            await _preview_submission_for_take(message, submission, campaign, author)
+            return
 
         await message.answer(
             "📭 <b>Очередь пуста</b>\n\n"
@@ -449,6 +511,52 @@ async def expert_take_next(callback: types.CallbackQuery, state: FSMContext) -> 
     await cmd_take(callback.message, state)
     await callback.answer()
 
+
+@router.callback_query(F.data.startswith("expert_confirm_take:"))
+async def expert_confirm_take(callback: types.CallbackQuery, state: FSMContext) -> None:
+    if not callback.message:
+        await callback.answer("Ошибка: не удалось получить сообщение", show_alert=True)
+        return
+    if not await check_expert_role(callback.message):
+        return
+
+    submission_id_text = callback.data.removeprefix("expert_confirm_take:")
+    if not submission_id_text.isdigit():
+        await callback.answer("Некорректный идентификатор работы", show_alert=True)
+        return
+
+    submission_id = int(submission_id_text)
+    data = await state.get_data()
+    pending_take_submission_id = data.get("pending_take_submission_id")
+
+    if pending_take_submission_id != submission_id:
+        await callback.answer("Предпросмотр устарел. Запросите работу заново через /take.", show_alert=True)
+        return
+
+    await state.update_data(
+        pending_take_submission_id=None,
+        pending_take_campaign_id=None,
+    )
+    await callback.answer("Берём работу на проверку...")
+    await _try_assign_submission_to_expert(callback.message, state, submission_id)
+
+@router.callback_query(F.data == "expert_cancel_take")
+async def expert_cancel_take(callback: types.CallbackQuery, state: FSMContext) -> None:
+    if not callback.message:
+        await callback.answer("Ошибка: не удалось получить сообщение", show_alert=True)
+        return
+    if not await check_expert_role(callback.message):
+        return
+
+    await state.update_data(
+        pending_take_submission_id=None,
+        pending_take_campaign_id=None,
+    )
+    await callback.message.answer(
+        "❌ Взятие работы отменено. Работа осталась в очереди.",
+        parse_mode="HTML",
+    )
+    await callback.answer("Отменено")
 
 @router.callback_query(F.data == "expert_show_stats")
 async def expert_show_stats(callback: types.CallbackQuery) -> None:

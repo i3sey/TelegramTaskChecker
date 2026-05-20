@@ -6,6 +6,7 @@ class RegistrationStates(StatesGroup):
     """States for user registration flow."""
     waiting_for_role = State()
     waiting_for_full_name = State()
+    confirming_full_name = State()
     waiting_for_study_group = State()
 
 

@@ -9,7 +9,6 @@ from aiogram.types import (
 
 from src.db.models import UserRole
 
-
 BTN_HELP = "❓ Помощь"
 BTN_PROFILE = "👤 Профиль"
 BTN_ROLE = "🎭 Роль"
@@ -45,7 +44,6 @@ BTN_SCORE_500 = "500"
 BTN_ANON_YES = "✅ Да, анонимно"
 BTN_ANON_NO = "❌ Нет, открыто"
 
-
 def _mk_markup(rows: list[list[str]]) -> ReplyKeyboardMarkup:
     keyboard = [[KeyboardButton(text=label) for label in row] for row in rows]
     return ReplyKeyboardMarkup(
@@ -56,10 +54,8 @@ def _mk_markup(rows: list[list[str]]) -> ReplyKeyboardMarkup:
 
 
 
-
 def build_campaign_title_keyboard() -> ReplyKeyboardMarkup:
     return _mk_markup([[BTN_PROFILE, BTN_ROLE, BTN_HELP]])
-
 
 def build_campaign_min_score_keyboard() -> ReplyKeyboardMarkup:
     return _mk_markup(
@@ -69,7 +65,6 @@ def build_campaign_min_score_keyboard() -> ReplyKeyboardMarkup:
         ]
     )
 
-
 def build_campaign_max_score_keyboard() -> ReplyKeyboardMarkup:
     return _mk_markup(
         [
@@ -77,7 +72,6 @@ def build_campaign_max_score_keyboard() -> ReplyKeyboardMarkup:
             [BTN_PROFILE, BTN_ROLE, BTN_HELP],
         ]
     )
-
 
 def build_campaign_ttl_keyboard() -> ReplyKeyboardMarkup:
     return _mk_markup(
@@ -87,10 +81,8 @@ def build_campaign_ttl_keyboard() -> ReplyKeyboardMarkup:
         ]
     )
 
-
 def build_campaign_anonymous_keyboard() -> ReplyKeyboardMarkup:
     return _mk_markup([[BTN_ANON_YES, BTN_ANON_NO], [BTN_PROFILE, BTN_ROLE, BTN_HELP]])
-
 
 def build_organizer_more_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -103,7 +95,6 @@ def build_organizer_more_keyboard() -> InlineKeyboardMarkup:
         ]
     )
 
-
 def build_expert_more_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -114,7 +105,6 @@ def build_expert_more_keyboard() -> InlineKeyboardMarkup:
         ]
     )
 
-
 def build_post_registration_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -124,6 +114,54 @@ def build_post_registration_keyboard() -> InlineKeyboardMarkup:
         ]
     )
 
+def build_full_name_confirmation_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Подтвердить", callback_data="reg_confirm_full_name"),
+                InlineKeyboardButton(text="✏️ Ввести заново", callback_data="reg_reenter_full_name"),
+            ]
+        ]
+    )
+
+def build_submission_confirmation_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Отправить", callback_data="submission_confirm"),
+                InlineKeyboardButton(text="✏️ Отменить и отправить заново", callback_data="submission_retry"),
+            ]
+        ]
+    )
+
+def build_take_submission_confirmation_keyboard(submission_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Взять на проверку",
+                    callback_data=f"expert_confirm_take:{submission_id}",
+                ),
+                InlineKeyboardButton(text="❌ Отмена", callback_data="expert_cancel_take"),
+            ]
+        ]
+    )
+
+def build_finish_campaign_confirmation_keyboard(campaign_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Завершить кампанию",
+                    callback_data=f"finish_campaign_confirm:{campaign_id}",
+                ),
+                InlineKeyboardButton(
+                    text="❌ Отмена",
+                    callback_data=f"finish_campaign_cancel:{campaign_id}",
+                ),
+            ]
+        ]
+    )
 
 def build_post_submission_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -135,7 +173,6 @@ def build_post_submission_keyboard() -> InlineKeyboardMarkup:
         ]
     )
 
-
 def build_post_review_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -146,7 +183,6 @@ def build_post_review_keyboard() -> InlineKeyboardMarkup:
         ]
     )
 
-
 def build_post_campaign_created_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -156,7 +192,6 @@ def build_post_campaign_created_keyboard() -> InlineKeyboardMarkup:
             ]
         ]
     )
-
 
 def build_comment_decision_keyboard() -> InlineKeyboardMarkup:
     """Build keyboard after score selection - comment, skip comment, ban, or cancel."""
@@ -169,7 +204,6 @@ def build_comment_decision_keyboard() -> InlineKeyboardMarkup:
         ]
     )
 
-
 def build_comment_final_keyboard() -> InlineKeyboardMarkup:
     """Build keyboard after comment entry - confirm, ban, or cancel."""
     return InlineKeyboardMarkup(
@@ -179,7 +213,6 @@ def build_comment_final_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="↩️ Вернуть работу в очередь", callback_data="cancel_review")],
         ]
     )
-
 
 def build_voice_comment_action_keyboard() -> InlineKeyboardMarkup:
     """Build keyboard for expert voice comment handling."""
@@ -211,7 +244,6 @@ def build_ban_comment_keyboard() -> InlineKeyboardMarkup:
         ]
     )
 
-
 def build_comment_skip_keyboard() -> InlineKeyboardMarkup:
     """Build keyboard for skipping comment after score selection."""
     return InlineKeyboardMarkup(
@@ -219,7 +251,6 @@ def build_comment_skip_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="⏭️ Пропустить комментарий", callback_data="comment_skip")],
         ]
     )
-
 
 def build_review_confirmation_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -231,11 +262,9 @@ def build_review_confirmation_keyboard() -> InlineKeyboardMarkup:
         ]
     )
 
-
 def get_confirm_keyboard() -> InlineKeyboardMarkup:
     """Alias for build_review_confirmation_keyboard for compatibility."""
     return build_review_confirmation_keyboard()
-
 
 def get_keyboard_for_role(role: UserRole):
     """Return a role-specific main reply keyboard."""
@@ -272,6 +301,3 @@ def get_keyboard_for_role(role: UserRole):
         )
 
     return _mk_markup([[BTN_ROLE, BTN_PROFILE, BTN_HELP]])
-
-
-

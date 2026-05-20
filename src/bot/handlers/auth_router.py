@@ -23,6 +23,7 @@ from src.bot.services.invite_service import (
 from src.bot.utils.logging import logger
 from src.bot.keyboards import (
     get_keyboard_for_role,
+    build_full_name_confirmation_keyboard,
     BTN_PROFILE,
     BTN_HELP,
     BTN_ROLE,
@@ -208,22 +209,73 @@ async def process_full_name(message: types.Message, state: FSMContext):
 
     data = await state.get_data()
     role = data.get("role")
-    invite_ok = data.get("invite_ok", False)
-    invite_role = data.get("invite_role")
-    invite_code = data.get("invite_code")
 
     if role is None:
         await message.answer("❌ Сначала выберите роль через /start.")
         await state.clear()
         return
 
+    role_line = f"🎭 Роль: <b>{_role_label(role)}</b>\n" if role else ""
+    group_hint = ""
     if role == UserRole.STUDENT:
-        await message.answer(
+        group_hint = "\nПосле подтверждения бот попросит ввести учебную группу."
+
+    await message.answer(
+        "🪪 <b>Проверьте ФИО</b>\n\n"
+        f"👤 <b>{full_name}</b>\n"
+        f"{role_line}"
+        f"{group_hint}\n\n"
+        "Если всё верно, подтвердите. Если есть опечатка — введите заново.",
+        parse_mode="HTML",
+        reply_markup=build_full_name_confirmation_keyboard(),
+    )
+    await state.set_state(RegistrationStates.confirming_full_name)
+
+
+@router.callback_query(StateFilter(RegistrationStates.confirming_full_name), F.data == "reg_reenter_full_name")
+async def reg_reenter_full_name(callback: types.CallbackQuery, state: FSMContext):
+    """Allow user to re-enter full name during registration."""
+    if not callback.message:
+        await callback.answer()
+        return
+
+    await state.set_state(RegistrationStates.waiting_for_full_name)
+    await callback.message.answer(
+        "✏️ Введите ваше <b>полное имя</b> (ФИО) заново:",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+@router.callback_query(StateFilter(RegistrationStates.confirming_full_name), F.data == "reg_confirm_full_name")
+async def reg_confirm_full_name(callback: types.CallbackQuery, state: FSMContext):
+    """Confirm full name and continue registration flow."""
+    if not callback.message:
+        await callback.answer()
+        return
+
+    data = await state.get_data()
+    full_name = data.get("full_name")
+    role = data.get("role")
+    invite_ok = data.get("invite_ok", False)
+    invite_role = data.get("invite_role")
+    invite_code = data.get("invite_code")
+
+    if not full_name or role is None:
+        await callback.message.answer(
+            "❌ Данные регистрации потеряны. Используйте /start для повторной попытки."
+        )
+        await state.clear()
+        await callback.answer()
+        return
+
+    if role == UserRole.STUDENT:
+        await callback.message.answer(
             "📚 Отлично! Теперь введите вашу <b>учебную группу</b>:\n"
             "(например: ИВТ-101, ИС-201)",
             parse_mode="HTML",
         )
         await state.set_state(RegistrationStates.waiting_for_study_group)
+        await callback.answer()
         return
 
     try:
@@ -233,7 +285,7 @@ async def process_full_name(message: types.Message, state: FSMContext):
                 invite = await get_invite_by_code(invite_code, session)
 
             await create_user(
-                tg_id=message.from_user.id,
+                tg_id=callback.from_user.id,
                 full_name=full_name,
                 study_group=None,
                 session=session,
@@ -250,7 +302,7 @@ async def process_full_name(message: types.Message, state: FSMContext):
         if invite_ok and invite_role == "expert":
             access_note = "\n\n✅ Инвайт активирован. Доступ к проверке работ открыт."
 
-        await message.answer(
+        await callback.message.answer(
             "✅ <b>Регистрация успешна!</b>\n\n"
             f"👤 <b>{full_name}</b>\n"
             f"🎭 Роль: <b>{_role_label(role)}</b>"
@@ -260,13 +312,14 @@ async def process_full_name(message: types.Message, state: FSMContext):
             reply_markup=get_keyboard_for_role(role),
         )
     except Exception as e:
-        logger.error(f"Failed to create user {message.from_user.id}: {e}")
-        await message.answer(
+        logger.error(f"Failed to create user {callback.from_user.id}: {e}")
+        await callback.message.answer(
             "❌ Произошла ошибка при регистрации. Попробуйте позже.\n"
             "Используйте /start для повторной попытки."
         )
         await state.clear()
 
+    await callback.answer()
 
 @router.message(StateFilter(RegistrationStates.waiting_for_study_group))
 async def process_study_group(message: types.Message, state: FSMContext):

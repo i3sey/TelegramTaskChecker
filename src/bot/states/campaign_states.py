@@ -20,6 +20,7 @@ class SubmissionStates(StatesGroup):
     """States for submission flow."""
     waiting_for_campaign = State()
     waiting_for_submission = State()
+    confirming_submission = State()
 
 
 class OrganizerSessionState(StatesGroup):
