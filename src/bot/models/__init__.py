@@ -8,6 +8,7 @@ from src.bot.models.models import (
     Review,
     CampaignType,
     SubmissionStatus,
+    SubmissionFormat,
 )
 
 __all__ = [
@@ -19,4 +20,5 @@ __all__ = [
     "Review",
     "CampaignType",
     "SubmissionStatus",
+    "SubmissionFormat",
 ]

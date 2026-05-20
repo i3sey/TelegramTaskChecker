@@ -1,8 +1,8 @@
 """Submission service for database operations."""
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.bot.models import Submission, SubmissionStatus
+from src.bot.models import Submission, SubmissionFormat, SubmissionStatus
 from src.bot.utils.logging import logger
 
 
@@ -13,8 +13,13 @@ class SubmissionService:
     async def create_submission(
         campaign_id: int,
         author_id: int,
-        file_id: str,
-        session: AsyncSession
+        session: AsyncSession,
+        submission_type: SubmissionFormat = SubmissionFormat.DOCUMENT,
+        file_id: str | None = None,
+        file_name: str | None = None,
+        mime_type: str | None = None,
+        text_content: str | None = None,
+        external_url: str | None = None,
     ) -> Submission:
         """
         Create a new submission.
@@ -22,8 +27,13 @@ class SubmissionService:
         Args:
             campaign_id: Campaign ID
             author_id: Author's user ID
-            file_id: Telegram file_id
             session: Database session
+            submission_type: Actual submitted content type
+            file_id: Telegram file_id for document/photo
+            file_name: Original file name if available
+            mime_type: MIME type if available
+            text_content: Submitted text content
+            external_url: Submitted external URL
 
         Returns:
             Created Submission object
@@ -31,7 +41,12 @@ class SubmissionService:
         submission = Submission(
             campaign_id=campaign_id,
             author_id=author_id,
+            submission_type=submission_type,
             file_id=file_id,
+            file_name=file_name,
+            mime_type=mime_type,
+            text_content=text_content,
+            external_url=external_url,
             status=SubmissionStatus.UPLOADED,
         )
         session.add(submission)
@@ -162,12 +177,25 @@ class SubmissionService:
 async def create_submission(
     campaign_id: int,
     author_id: int,
-    file_id: str,
-    session: AsyncSession
+    session: AsyncSession,
+    submission_type: SubmissionFormat = SubmissionFormat.DOCUMENT,
+    file_id: str | None = None,
+    file_name: str | None = None,
+    mime_type: str | None = None,
+    text_content: str | None = None,
+    external_url: str | None = None,
 ) -> Submission:
     """Create a new submission."""
     return await SubmissionService.create_submission(
-        campaign_id, author_id, file_id, session
+        campaign_id=campaign_id,
+        author_id=author_id,
+        session=session,
+        submission_type=submission_type,
+        file_id=file_id,
+        file_name=file_name,
+        mime_type=mime_type,
+        text_content=text_content,
+        external_url=external_url,
     )
 
 

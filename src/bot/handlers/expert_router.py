@@ -7,7 +7,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from src.db.engine import session_scope
-from src.db.models import UserRole, SubmissionStatus, User, Campaign
+from src.db.models import UserRole, SubmissionStatus, SubmissionFormat, User, Campaign
 from src.bot.services.user_service import get_user, get_users_by_role
 from src.bot.services.submission_service import get_submission, update_submission_status
 from src.bot.services.review_service import create_review, count_pending_submissions, get_submission_pending
@@ -129,13 +129,71 @@ async def check_expert_role(message: types.Message) -> bool:
     return True
 
 
+async def _send_submission_content(
+    message: types.Message,
+    submission,
+    caption: str,
+) -> None:
+    submission_type = submission.submission_type or SubmissionFormat.DOCUMENT
+
+    if submission_type == SubmissionFormat.TEXT:
+        text_body = (submission.text_content or "").strip() or "—"
+        await message.answer(
+            f"{caption}\n\n📝 <b>Текст работы:</b>\n<blockquote>{text_body}</blockquote>",
+            parse_mode="HTML",
+        )
+        return
+
+    if submission_type == SubmissionFormat.LINK:
+        await message.answer(
+            f"{caption}\n\n🔗 <b>Ссылка:</b>\n{submission.external_url or '—'}",
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+        return
+
+    try:
+        if submission_type == SubmissionFormat.PHOTO and submission.file_id:
+            await message.answer_photo(
+                photo=submission.file_id,
+                caption=caption,
+                parse_mode="HTML",
+            )
+            return
+
+        if submission.file_id:
+            await message.answer_document(
+                document=submission.file_id,
+                caption=caption,
+                parse_mode="HTML",
+            )
+            return
+
+        await message.answer(
+            caption + "\n\n⚠️ У работы отсутствует вложение для отправки.",
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        logger.error(
+            f"Failed to send submission {submission.id} "
+            f"of type {submission_type.value}: {e}"
+        )
+        fallback = caption + "\n\n⚠️ Вложение не удалось отправить, но вы всё равно можете выставить оценку."
+        if submission_type == SubmissionFormat.LINK and submission.external_url:
+            fallback += f"\n🔗 Ссылка: {submission.external_url}"
+        elif submission_type == SubmissionFormat.TEXT and submission.text_content:
+            fallback += f"\n📝 Текст:\n<blockquote>{submission.text_content}</blockquote>"
+        elif submission.file_name:
+            fallback += f"\n📄 Файл: <b>{submission.file_name}</b>"
+        await message.answer(fallback, parse_mode="HTML")
+
 async def send_submission_to_expert(
     message: types.Message,
     submission,
     campaign,
     author: User
 ) -> None:
-    """Send submission file to expert with scoring interface."""
+    """Send submission to expert with scoring interface."""
     caption = (
         f"📄 <b>Новая работа для проверки</b>\n\n"
         f"📋 Кампания: <b>{campaign.title}</b>\n"
@@ -147,18 +205,7 @@ async def send_submission_to_expert(
         f"Оценивание: от <b>{campaign.min_score}</b> до <b>{campaign.max_score}</b>.\n"
         "Дальше: введите оценку → напишите комментарий → подтвердите результат."
     )
-    try:
-        await message.answer_document(
-            document=submission.file_id,
-            caption=caption,
-            parse_mode="HTML",
-        )
-    except Exception as e:
-        logger.error(f"Failed to send file {submission.file_id}: {e}")
-        await message.answer(
-            caption + "\n\n⚠️ Файл не удалось отправить, но вы всё равно можете выставить оценку.",
-            parse_mode="HTML",
-        )
+    await _send_submission_content(message, submission, caption)
 
     reviewer_role = UserRole.EXPERT
     async with session_scope() as session:

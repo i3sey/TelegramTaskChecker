@@ -7,8 +7,16 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import func, select
 
 from src.db.engine import session_scope
-from src.db.models import UserRole, CampaignType, Campaign, Submission, Review, SubmissionStatus
-from src.db.models import UserRole, CampaignType, Campaign, Submission, Review, SubmissionStatus, InviteCode
+from src.db.models import (
+    UserRole,
+    CampaignType,
+    Campaign,
+    Submission,
+    Review,
+    SubmissionStatus,
+    InviteCode,
+    SubmissionFormat,
+)
 from src.bot.services.user_service import get_user
 from src.bot.services.campaign_service import (
     get_campaign,
@@ -130,6 +138,92 @@ def _build_inline_keyboard(rows: list[list[tuple[str, str]]]):
         )
     return builder.as_markup()
 
+
+def _submission_format_label(submission_format: SubmissionFormat) -> str:
+    labels = {
+        SubmissionFormat.DOCUMENT: "Документ",
+        SubmissionFormat.TEXT: "Текст",
+        SubmissionFormat.PHOTO: "Фото",
+        SubmissionFormat.PHOTO_DOCUMENT: "Фото документом",
+        SubmissionFormat.LINK: "Ссылка",
+    }
+    return labels.get(submission_format, submission_format.value)
+
+def _build_submission_format_keyboard():
+    return _build_inline_keyboard([
+        [("📄 Документ", "subfmt_document"), ("📝 Текст", "subfmt_text")],
+        [("🖼 Фото", "subfmt_photo"), ("🖼📎 Фото документом", "subfmt_photo_document")],
+        [("🔗 Ссылка", "subfmt_link")],
+    ])
+
+def _submission_prompt_text(campaign: Campaign) -> str:
+    prompts = {
+        SubmissionFormat.DOCUMENT: (
+            "📎 <b>Отправьте документ для проверки:</b>\n\n"
+            f"📋 Кампания: <b>{campaign.title}</b>\n"
+            "📄 Разрешённый формат: документ\n"
+            "📦 Макс. размер: 50 МБ"
+        ),
+        SubmissionFormat.TEXT: (
+            "📝 <b>Отправьте текст работы одним сообщением:</b>\n\n"
+            f"📋 Кампания: <b>{campaign.title}</b>\n"
+            "📌 Сообщение не должно быть пустым"
+        ),
+        SubmissionFormat.PHOTO: (
+            "🖼 <b>Отправьте фото для проверки:</b>\n\n"
+            f"📋 Кампания: <b>{campaign.title}</b>\n"
+            "📌 Принимается Telegram photo"
+        ),
+        SubmissionFormat.PHOTO_DOCUMENT: (
+            "🖼📎 <b>Отправьте фото как документ:</b>\n\n"
+            f"📋 Кампания: <b>{campaign.title}</b>\n"
+            "📄 Разрешённые расширения: .jpg, .jpeg, .png\n"
+            "📦 Макс. размер: 50 МБ"
+        ),
+        SubmissionFormat.LINK: (
+            "🔗 <b>Отправьте ссылку на работу:</b>\n\n"
+            f"📋 Кампания: <b>{campaign.title}</b>\n"
+            "📌 Поддерживается любой корректный URL"
+        ),
+    }
+    return prompts.get(campaign.submission_format, prompts[SubmissionFormat.DOCUMENT])
+
+def _submission_success_details(submission: Submission) -> str:
+    if submission.submission_type == SubmissionFormat.TEXT:
+        preview = (submission.text_content or "").strip()
+        if len(preview) > 160:
+            preview = f"{preview[:157]}..."
+        return f"📝 Формат: <b>Текст</b>\n📄 Содержимое: <blockquote>{preview}</blockquote>"
+
+    if submission.submission_type == SubmissionFormat.LINK:
+        return (
+            "🔗 Формат: <b>Ссылка</b>\n"
+            f"🌐 URL: <code>{submission.external_url or '-'}</code>"
+        )
+
+    if submission.submission_type == SubmissionFormat.PHOTO:
+        return "🖼 Формат: <b>Фото</b>"
+
+    if submission.submission_type == SubmissionFormat.PHOTO_DOCUMENT:
+        return (
+            "🖼📎 Формат: <b>Фото документом</b>\n"
+            f"📄 Файл: <b>{submission.file_name or 'image'}</b>"
+        )
+
+    return (
+        "📄 Формат: <b>Документ</b>\n"
+        f"📄 Файл: <b>{submission.file_name or 'document'}</b>"
+    )
+
+def _submission_error_text(campaign: Campaign) -> str:
+    errors = {
+        SubmissionFormat.DOCUMENT: "❌ Пожалуйста, отправьте документ.",
+        SubmissionFormat.TEXT: "❌ Пожалуйста, отправьте текст одним сообщением.",
+        SubmissionFormat.PHOTO: "❌ Пожалуйста, отправьте фото.",
+        SubmissionFormat.PHOTO_DOCUMENT: "❌ Пожалуйста, отправьте изображение как документ.",
+        SubmissionFormat.LINK: "❌ Пожалуйста, отправьте корректную ссылку.",
+    }
+    return errors.get(campaign.submission_format, "❌ Отправьте работу в требуемом формате.")
 
 def _build_min_score_keyboard():
     return _build_inline_keyboard([
@@ -682,12 +776,11 @@ async def process_campaign_deadline_callback(callback: types.CallbackQuery, stat
     logger.debug(f"Campaign deadline days selected: {days}")
 
     await callback.message.edit_text(
-        "🔒 <b>Сделать рецензии анонимными?</b>\n"
-        "Если выбрать «Да», автор не увидит имя проверяющего.",
-        reply_markup=_build_anonymous_keyboard(),
+        "📥 <b>Выберите формат сдачи работы:</b>",
+        reply_markup=_build_submission_format_keyboard(),
         parse_mode="HTML",
     )
-    await state.set_state(CampaignCreationStates.waiting_for_anonymous)
+    await state.set_state(CampaignCreationStates.waiting_for_submission_format)
     await callback.answer()
 
 
@@ -705,13 +798,44 @@ async def process_campaign_deadline_message(message: types.Message, state: FSMCo
     logger.debug(f"Campaign deadline days entered: {days}")
 
     await message.answer(
+        "📥 <b>Выберите формат сдачи работы:</b>",
+        reply_markup=_build_submission_format_keyboard(),
+        parse_mode="HTML",
+    )
+    await state.set_state(CampaignCreationStates.waiting_for_submission_format)
+
+
+@router.callback_query(StateFilter(CampaignCreationStates.waiting_for_submission_format))
+async def process_submission_format_callback(callback: types.CallbackQuery, state: FSMContext):
+    if not callback.data or not callback.data.startswith("subfmt_"):
+        await callback.answer()
+        return
+
+    format_value = callback.data.removeprefix("subfmt_")
+    try:
+        submission_format = SubmissionFormat(format_value)
+    except ValueError:
+        await callback.answer("❌ Неизвестный формат сдачи", show_alert=True)
+        return
+
+    await state.update_data(submission_format=submission_format.value)
+
+    await callback.message.edit_text(
         "🔒 <b>Сделать рецензии анонимными?</b>\n"
         "Если выбрать «Да», автор не увидит имя проверяющего.",
         reply_markup=_build_anonymous_keyboard(),
         parse_mode="HTML",
     )
     await state.set_state(CampaignCreationStates.waiting_for_anonymous)
+    await callback.answer()
 
+@router.message(StateFilter(CampaignCreationStates.waiting_for_submission_format))
+async def process_submission_format_message(message: types.Message):
+    await message.answer(
+        "📥 <b>Выберите формат сдачи кнопкой ниже:</b>",
+        reply_markup=_build_submission_format_keyboard(),
+        parse_mode="HTML",
+    )
 
 @router.callback_query(StateFilter(CampaignCreationStates.waiting_for_anonymous))
 async def process_campaign_anonymous_callback(callback: types.CallbackQuery, state: FSMContext):
@@ -740,6 +864,9 @@ async def process_campaign_anonymous_callback(callback: types.CallbackQuery, sta
                 p2p_reviews_required=data.get("p2p_reviews_required", 3),
                 voting_type=data.get("voting_type"),
                 organizer_id=tg_id,
+                submission_format=SubmissionFormat(
+                    data.get("submission_format", SubmissionFormat.DOCUMENT.value)
+                ),
                 session=session,
             )
 
@@ -768,7 +895,8 @@ async def process_campaign_anonymous_callback(callback: types.CallbackQuery, sta
                 f"{score_line}"
                 f"⏱ Дедлайн проверки эксперта: {format_ttl_minutes(campaign.ttl_minutes)}\n"
                 f"📅 Дедлайн сдачи работ: {campaign_deadline_at.astimezone().strftime('%d.%m.%Y %H:%M')}\n"
-                f"🔒 Анонимность: {'Да' if is_anon else 'Нет'}"
+                f"🔒 Анонимность: {'Да' if is_anon else 'Нет'}\n"
+                f"📥 Формат сдачи: {_submission_format_label(campaign.submission_format)}"
                 f"{extra_lines}"
                 f"{_format_invite_block(bot_username, student_code, expert_code)}",
                 parse_mode="HTML",
@@ -1191,58 +1319,23 @@ async def process_campaign_selection(callback: types.CallbackQuery, state: FSMCo
     await state.update_data(campaign_id=campaign_id)
 
     await callback.message.edit_text(
-        "📎 <b>Отправьте файл для проверки:</b>\n\n"
-        f"📋 Кампания: <b>{campaign.title}</b>\n"
-        f"📄 Форматы: .pdf, .docx, .doc, .txt, .jpg, .png\n"
-        f"📦 Макс. размер: 50 МБ",
+        _submission_prompt_text(campaign),
         parse_mode="HTML",
     )
-    await state.set_state(SubmissionStates.waiting_for_file)
+    await state.set_state(SubmissionStates.waiting_for_submission)
     await callback.answer()
 
 
-@router.message(StateFilter(SubmissionStates.waiting_for_file))
+@router.message(StateFilter(SubmissionStates.waiting_for_submission))
 async def process_submission_file(message: types.Message, state: FSMContext):
-    """Process uploaded file as submission."""
+    """Process uploaded submission according to campaign format."""
     from src.bot.services.submission_service import (
         create_submission,
         check_user_has_submission,
     )
-    
+    from src.bot.utils.validators import validate_submission_message
 
     tg_id = message.from_user.id
-
-    # Check if message has document
-    if not message.document:
-        builder = InlineKeyboardBuilder()
-        builder.add(types.InlineKeyboardButton(
-            text="❌ Отмена",
-            callback_data="back_to_menu"
-        ))
-        await message.answer(
-            "❌ Пожалуйста, отправьте файл (документ).",
-            reply_markup=builder.as_markup(),
-        )
-        return
-
-    document = message.document
-    file_name = document.file_name or "unknown"
-    file_size = document.file_size or 0
-
-    # Validate file
-    from src.bot.utils.validators import validate_file
-
-    is_valid, error_msg = validate_file(file_name, file_size)
-    if not is_valid:
-        builder = InlineKeyboardBuilder()
-        builder.add(types.InlineKeyboardButton(
-            text="❌ Отмена",
-            callback_data="back_to_menu"
-        ))
-        await message.answer(error_msg, reply_markup=builder.as_markup())
-        return
-
-    # Get campaign from state
     data = await state.get_data()
     campaign_id = data.get("campaign_id")
 
@@ -1251,10 +1344,20 @@ async def process_submission_file(message: types.Message, state: FSMContext):
         await state.clear()
         return
 
-    # Create submission
+    builder = InlineKeyboardBuilder()
+    builder.add(types.InlineKeyboardButton(
+        text="❌ Отмена",
+        callback_data="back_to_menu"
+    ))
+
     async with session_scope() as session:
         try:
-            # Check if user already has submission
+            campaign = await get_campaign(campaign_id, session)
+            if not campaign:
+                await message.answer("❌ Кампания не найдена.")
+                await state.clear()
+                return
+
             has_submission = await check_user_has_submission(
                 campaign_id, tg_id, session
             )
@@ -1265,30 +1368,42 @@ async def process_submission_file(message: types.Message, state: FSMContext):
                 )
                 return
 
+            is_valid, error_msg, payload = validate_submission_message(campaign, message)
+            if not is_valid:
+                await message.answer(
+                    error_msg or _submission_error_text(campaign),
+                    reply_markup=builder.as_markup(),
+                )
+                return
+
             submission = await create_submission(
                 campaign_id=campaign_id,
                 author_id=tg_id,
-                file_id=document.file_id,
+                submission_type=payload["submission_type"],
+                file_id=payload.get("file_id"),
+                file_name=payload.get("file_name"),
+                mime_type=payload.get("mime_type"),
+                text_content=payload.get("text_content"),
+                external_url=payload.get("external_url"),
                 session=session,
             )
 
             logger.info(
                 f"Submission created: id={submission.id}, "
-                f"campaign={campaign_id}, author={tg_id}"
+                f"campaign={campaign_id}, author={tg_id}, "
+                f"type={submission.submission_type.value}"
             )
 
-            campaign = await get_campaign(campaign_id, session)
             await message.answer(
                 "✅ <b>Работа успешно загружена!</b>\n\n"
-                f"📋 Кампания: <b>{campaign.title if campaign else f'Кампания #{campaign_id}'}</b>\n"
-                f"📄 Файл: <b>{file_name}</b>\n"
+                f"📋 Кампания: <b>{campaign.title}</b>\n"
+                f"{_submission_success_details(submission)}\n"
                 f"🆔 Работа: <code>{submission.id}</code>\n"
                 f"📌 Статус: 🟡 <b>Ожидает проверки</b>\n"
                 "Что дальше: дождитесь, когда работу возьмут на проверку.",
                 parse_mode="HTML",
             )
-            
-            # Get user role for keyboard
+
             user = await get_user(tg_id=tg_id, session=session)
             if user:
                 await message.answer(

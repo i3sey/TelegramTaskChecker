@@ -13,12 +13,13 @@ class CampaignCreationStates(StatesGroup):
     waiting_for_ttl = State()
     waiting_for_campaign_deadline_days = State()
     waiting_for_anonymous = State()
+    waiting_for_submission_format = State()
 
 
 class SubmissionStates(StatesGroup):
     """States for submission flow."""
     waiting_for_campaign = State()
-    waiting_for_file = State()
+    waiting_for_submission = State()
 
 
 class OrganizerSessionState(StatesGroup):

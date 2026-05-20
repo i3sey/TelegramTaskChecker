@@ -19,7 +19,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.base import Base
 
-
 class UserRole(str, enum.Enum):
     """User roles in the system."""
     STUDENT = "student"
@@ -27,13 +26,11 @@ class UserRole(str, enum.Enum):
     EXPERT_ORGANIZER = "expert_organizer"
     ORGANIZER = "organizer"
 
-
 class CampaignType(str, enum.Enum):
     """Campaign types."""
     EXPERT = "expert"
     P2P = "p2p"
     VOTING = "voting"
-
 
 class SubmissionStatus(str, enum.Enum):
     """Submission status."""
@@ -42,6 +39,13 @@ class SubmissionStatus(str, enum.Enum):
     REVIEWED = "reviewed"
     REJECTED = "rejected"
 
+class SubmissionFormat(str, enum.Enum):
+    """Allowed submission formats for campaigns and actual submission types."""
+    DOCUMENT = "document"
+    TEXT = "text"
+    PHOTO = "photo"
+    PHOTO_DOCUMENT = "photo_document"
+    LINK = "link"
 
 class User(Base):
     """User model - Telegram user information."""
@@ -88,7 +92,6 @@ class User(Base):
         Index("ix_users_is_banned", "is_banned"),
     )
 
-
 class InviteCode(Base):
     """Invite code model for role-based access."""
     __tablename__ = "invite_codes"
@@ -117,7 +120,6 @@ class InviteCode(Base):
         Index("ix_invite_codes_active", "is_active"),
     )
 
-
 class Campaign(Base):
     """Campaign model - assignment/competition."""
     __tablename__ = "campaigns"
@@ -142,6 +144,12 @@ class Campaign(Base):
         nullable=False,
     )
     voting_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    submission_format: Mapped[SubmissionFormat] = mapped_column(
+        Enum(SubmissionFormat, name="submission_format"),
+        default=SubmissionFormat.DOCUMENT,
+        nullable=False,
+    )
+    allowed_extensions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -167,9 +175,8 @@ class Campaign(Base):
         Index("ix_campaigns_is_active", "is_active"),
     )
 
-
 class Submission(Base):
-    """Submission model - user's file submission."""
+    """Submission model - user's submission in any supported format."""
     __tablename__ = "submissions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -183,7 +190,16 @@ class Submission(Base):
         ForeignKey("users.tg_id", ondelete="CASCADE"),
         nullable=False,
     )
-    file_id: Mapped[str] = mapped_column(String(500), nullable=False)
+    submission_type: Mapped[SubmissionFormat] = mapped_column(
+        Enum(SubmissionFormat, name="submission_type"),
+        default=SubmissionFormat.DOCUMENT,
+        nullable=False,
+    )
+    file_id: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    file_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    mime_type: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    text_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    external_url: Mapped[Optional[str]] = mapped_column(String(2000), nullable=True)
     status: Mapped[SubmissionStatus] = mapped_column(
         Enum(SubmissionStatus, name="submission_status"),
         default=SubmissionStatus.UPLOADED,
@@ -220,7 +236,6 @@ class Submission(Base):
         Index("ix_submissions_status", "status"),
         Index("ix_submissions_author_campaign", "author_id", "campaign_id"),
     )
-
 
 class Review(Base):
     """Review model - expert/p2p review of submission."""

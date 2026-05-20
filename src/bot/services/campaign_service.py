@@ -5,7 +5,15 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from src.bot.models import Campaign, CampaignType, Review, Submission, SubmissionStatus, User
+from src.bot.models import (
+    Campaign,
+    CampaignType,
+    Review,
+    Submission,
+    SubmissionFormat,
+    SubmissionStatus,
+    User,
+)
 from src.bot.utils.logging import logger
 
 class CampaignService:
@@ -129,7 +137,9 @@ class CampaignService:
         p2p_reviews_required: int,
         voting_type: str | None,
         organizer_id: int,
-        session: AsyncSession
+        session: AsyncSession,
+        submission_format: SubmissionFormat = SubmissionFormat.DOCUMENT,
+        allowed_extensions: str | None = None,
     ) -> Campaign:
         """
         Create a new campaign.
@@ -157,6 +167,8 @@ class CampaignService:
             is_expert_anon=is_expert_anon,
             p2p_reviews_required=p2p_reviews_required,
             voting_type=voting_type,
+            submission_format=submission_format,
+            allowed_extensions=allowed_extensions,
         )
         session.add(campaign)
         await session.flush()
@@ -472,13 +484,25 @@ async def create_campaign(
     p2p_reviews_required: int,
     voting_type: str | None,
     organizer_id: int,
-    session: AsyncSession
+    session: AsyncSession,
+    submission_format: SubmissionFormat = SubmissionFormat.DOCUMENT,
+    allowed_extensions: str | None = None,
 ) -> Campaign:
     """Create a new campaign."""
     return await CampaignService.create_campaign(
-        title, campaign_type, min_score, max_score,
-        ttl_minutes, campaign_deadline_at, is_expert_anon, p2p_reviews_required,
-        voting_type, organizer_id, session
+        title,
+        campaign_type,
+        min_score,
+        max_score,
+        ttl_minutes,
+        campaign_deadline_at,
+        is_expert_anon,
+        p2p_reviews_required,
+        voting_type,
+        organizer_id,
+        session,
+        submission_format,
+        allowed_extensions,
     )
 
 async def update_campaign(

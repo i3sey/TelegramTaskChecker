@@ -12,7 +12,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import and_, exists, func, select
 
 from src.db.engine import session_scope
-from src.db.models import CampaignType, Review, Submission, UserRole
+from src.db.models import CampaignType, Review, Submission, SubmissionFormat, UserRole
 from src.bot.services.queue_service import queue_service
 from src.bot.services.campaign_service import get_active_campaigns, get_campaign
 from src.bot.services.review_service import (
@@ -235,6 +235,64 @@ def _campaign_deadline(campaign) -> datetime | None:
     return created_at + timedelta(minutes=ttl_minutes)
 
 
+async def _send_submission_content(
+    message: types.Message,
+    submission: Submission,
+    caption: str,
+) -> None:
+    submission_type = submission.submission_type or SubmissionFormat.DOCUMENT
+
+    if submission_type == SubmissionFormat.TEXT:
+        text_body = (submission.text_content or "").strip() or "—"
+        await message.answer(
+            f"{caption}\n\n📝 <b>Текст работы:</b>\n<blockquote>{text_body}</blockquote>",
+            parse_mode="HTML",
+        )
+        return
+
+    if submission_type == SubmissionFormat.LINK:
+        await message.answer(
+            f"{caption}\n\n🔗 <b>Ссылка:</b>\n{submission.external_url or '—'}",
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+        return
+
+    try:
+        if submission_type == SubmissionFormat.PHOTO and submission.file_id:
+            await message.answer_photo(
+                photo=submission.file_id,
+                caption=caption,
+                parse_mode="HTML",
+            )
+            return
+
+        if submission.file_id:
+            await message.answer_document(
+                document=submission.file_id,
+                caption=caption,
+                parse_mode="HTML",
+            )
+            return
+
+        await message.answer(
+            caption + "\n\n⚠️ У работы отсутствует вложение для отправки.",
+            parse_mode="HTML",
+        )
+    except Exception as exc:
+        logger.warning(
+            f"Failed to send submission {submission.id} "
+            f"of type {submission_type.value}: {exc}"
+        )
+        fallback = caption + "\n\n⚠️ Вложение не удалось отправить."
+        if submission_type == SubmissionFormat.LINK and submission.external_url:
+            fallback += f"\n🔗 Ссылка: {submission.external_url}"
+        elif submission_type == SubmissionFormat.TEXT and submission.text_content:
+            fallback += f"\n📝 Текст:\n<blockquote>{submission.text_content}</blockquote>"
+        elif submission.file_name:
+            fallback += f"\n📄 Файл: <b>{submission.file_name}</b>"
+        await message.answer(fallback, parse_mode="HTML")
+
 async def _send_p2p_submission(
     message: types.Message,
     submission: Submission,
@@ -247,15 +305,7 @@ async def _send_p2p_submission(
         f"⏳ Время на проверку: <b>{format_ttl_minutes(campaign.ttl_minutes)}</b>\n\n"
         f"Оценивание: от <b>{campaign.min_score}</b> до <b>{campaign.max_score}</b>."
     )
-    try:
-        await message.answer_document(
-            document=submission.file_id,
-            caption=caption,
-            parse_mode="HTML",
-        )
-    except Exception as exc:
-        logger.warning(f"Failed to send P2P file {submission.file_id}: {exc}")
-        await message.answer(caption, parse_mode="HTML")
+    await _send_submission_content(message, submission, caption)
     await message.answer(
         f"⬇️ Введите оценку числом ({campaign.min_score}–{campaign.max_score})."
     )
@@ -272,15 +322,7 @@ async def _send_voting_submission(
         f"🆔 Работа: <code>{submission.id}</code>\n"
         f"Тип: <b>{voting_type_label(campaign.voting_type)}</b>"
     )
-    try:
-        await message.answer_document(
-            document=submission.file_id,
-            caption=caption,
-            parse_mode="HTML",
-        )
-    except Exception as exc:
-        logger.warning(f"Failed to send voting file {submission.file_id}: {exc}")
-        await message.answer(caption, parse_mode="HTML")
+    await _send_submission_content(message, submission, caption)
 
 
 @router.message(Command("p2p"))
