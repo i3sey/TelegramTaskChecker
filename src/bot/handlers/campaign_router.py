@@ -1329,6 +1329,10 @@ async def process_campaign_selection(callback: types.CallbackQuery, state: FSMCo
 @router.message(StateFilter(SubmissionStates.waiting_for_submission))
 async def process_submission_file(message: types.Message, state: FSMContext):
     """Process uploaded submission according to campaign format."""
+    from src.bot.services.public_link_validator import (
+        build_public_link_error_message,
+        validate_public_link,
+    )
     from src.bot.services.submission_service import (
         create_submission,
         check_user_has_submission,
@@ -1375,6 +1379,19 @@ async def process_submission_file(message: types.Message, state: FSMContext):
                     reply_markup=builder.as_markup(),
                 )
                 return
+
+            if campaign.submission_format == SubmissionFormat.LINK:
+                public_link_result = await validate_public_link(
+                    payload["external_url"]
+                )
+                if not public_link_result.is_accessible:
+                    await message.answer(
+                        build_public_link_error_message(public_link_result),
+                        reply_markup=builder.as_markup(),
+                    )
+                    return
+
+                payload["external_url"] = public_link_result.normalized_url
 
             submission = await create_submission(
                 campaign_id=campaign_id,

@@ -159,10 +159,11 @@ def build_post_campaign_created_keyboard() -> InlineKeyboardMarkup:
 
 
 def build_comment_decision_keyboard() -> InlineKeyboardMarkup:
-    """Build keyboard after score selection - proceed to comment, ban, or cancel."""
+    """Build keyboard after score selection - comment, skip comment, ban, or cancel."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="📝 Оставить комментарий", callback_data="score_proceed_comment")],
+            [InlineKeyboardButton(text="✅ Отправить без комментария", callback_data="comment_skip")],
             [InlineKeyboardButton(text="⛔ Пожаловаться на студента", callback_data="score_proceed_ban")],
             [InlineKeyboardButton(text="↩️ Вернуть работу в очередь", callback_data="cancel_review")],
         ]
