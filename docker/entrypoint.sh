@@ -28,13 +28,25 @@ POSTGRES_SOCKET_DIR="/var/run/postgresql"
 POSTGRES_LOG_FILE="/var/log/postgresql/postgres.log"
 REDIS_DATA_DIR="/data"
 REDIS_CONF_FILE="/tmp/redis.conf"
+POSTGRES_BIN_DIR="$(find /usr/lib/postgresql -mindepth 2 -maxdepth 2 -type d -name bin | sort | tail -n 1)"
+
+if [ -z "$POSTGRES_BIN_DIR" ]; then
+  echo "PostgreSQL binaries directory not found" >&2
+  exit 1
+fi
+
+INITDB_BIN="$POSTGRES_BIN_DIR/initdb"
+PG_CTL_BIN="$POSTGRES_BIN_DIR/pg_ctl"
+PG_ISREADY_BIN="$POSTGRES_BIN_DIR/pg_isready"
+PSQL_BIN="$POSTGRES_BIN_DIR/psql"
+CREATEDB_BIN="$POSTGRES_BIN_DIR/createdb"
 
 mkdir -p "$POSTGRES_DATA_DIR" "$POSTGRES_SOCKET_DIR" "$(dirname "$POSTGRES_LOG_FILE")" "$REDIS_DATA_DIR"
 chown -R postgres:postgres /var/lib/postgresql /var/run/postgresql /var/log/postgresql
 chmod 700 "$POSTGRES_DATA_DIR"
 
 if [ ! -s "$POSTGRES_DATA_DIR/PG_VERSION" ]; then
-  su postgres -c "initdb -D '$POSTGRES_DATA_DIR'"
+  su postgres -c "'$INITDB_BIN' -D '$POSTGRES_DATA_DIR'"
 fi
 
 POSTGRES_CONF="$POSTGRES_DATA_DIR/postgresql.conf"
@@ -50,16 +62,16 @@ if ! grep -q "^host all all all scram-sha-256$" "$PG_HBA_CONF"; then
   echo "host all all all scram-sha-256" >> "$PG_HBA_CONF"
 fi
 
-su postgres -c "pg_ctl -D '$POSTGRES_DATA_DIR' -l '$POSTGRES_LOG_FILE' -o '-p $POSTGRES_PORT' start"
+su postgres -c "'$PG_CTL_BIN' -D '$POSTGRES_DATA_DIR' -l '$POSTGRES_LOG_FILE' -o '-p $POSTGRES_PORT' start"
 
-until pg_isready -h 127.0.0.1 -p "$POSTGRES_PORT" -U postgres >/dev/null 2>&1; do
+until "$PG_ISREADY_BIN" -h 127.0.0.1 -p "$POSTGRES_PORT" -U postgres >/dev/null 2>&1; do
   sleep 1
 done
 
-su postgres -c "psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres -c \"ALTER USER postgres WITH PASSWORD '$POSTGRES_PASSWORD';\""
+su postgres -c "'$PSQL_BIN' -v ON_ERROR_STOP=1 --username postgres --dbname postgres -c \"ALTER USER postgres WITH PASSWORD '$POSTGRES_PASSWORD';\""
 
-if ! su postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname = '$POSTGRES_DB'\" postgres" | grep -q 1; then
-  su postgres -c "createdb -O postgres '$POSTGRES_DB'"
+if ! su postgres -c "'$PSQL_BIN' -tAc \"SELECT 1 FROM pg_database WHERE datname = '$POSTGRES_DB'\" postgres" | grep -q 1; then
+  su postgres -c "'$CREATEDB_BIN' -O postgres '$POSTGRES_DB'"
 fi
 
 cat > "$REDIS_CONF_FILE" <<EOF
@@ -94,7 +106,7 @@ cleanup() {
   fi
 
   redis-cli -h 127.0.0.1 -p "$REDIS_PORT" ${REDIS_PASSWORD:+-a "$REDIS_PASSWORD"} shutdown >/dev/null 2>&1 || true
-  su postgres -c "pg_ctl -D '$POSTGRES_DATA_DIR' -m fast stop" >/dev/null 2>&1 || true
+  su postgres -c "'$PG_CTL_BIN' -D '$POSTGRES_DATA_DIR' -m fast stop" >/dev/null 2>&1 || true
 }
 
 trap cleanup INT TERM EXIT
