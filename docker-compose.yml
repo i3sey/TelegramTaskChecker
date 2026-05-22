@@ -1,9 +1,27 @@
 version: '3.8'
 
 services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: telegram_task_checker_bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      - postgres
+      - redis
+
   postgres:
     image: postgres:16-alpine
     container_name: telegram_task_checker_postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -16,6 +34,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: telegram_task_checker_redis
+    restart: unless-stopped
     ports:
       - "6379:6379"
 
