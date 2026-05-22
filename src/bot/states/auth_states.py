@@ -8,6 +8,7 @@ class RegistrationStates(StatesGroup):
     waiting_for_full_name = State()
     confirming_full_name = State()
     waiting_for_study_group = State()
+    confirming_study_group = State()
 
 
 class RoleChangeStates(StatesGroup):

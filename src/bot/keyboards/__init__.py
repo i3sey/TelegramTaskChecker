@@ -125,6 +125,16 @@ def build_full_name_confirmation_keyboard() -> InlineKeyboardMarkup:
         ]
     )
 
+def build_study_group_confirmation_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Подтвердить", callback_data="reg_confirm_study_group"),
+                InlineKeyboardButton(text="✏️ Ввести заново", callback_data="reg_reenter_study_group"),
+            ]
+        ]
+    )
+
 def build_submission_confirmation_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
