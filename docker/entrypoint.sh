@@ -102,6 +102,8 @@ start_local_postgres() {
     PASSWORD_FILE="$(mktemp)"
     trap 'rm -f "$PASSWORD_FILE"' EXIT
     printf "%s" "$POSTGRES_PASSWORD" > "$PASSWORD_FILE"
+    chown postgres:postgres "$PASSWORD_FILE"
+    chmod 600 "$PASSWORD_FILE"
     gosu postgres "$INITDB_BIN" -D "$PGDATA" --username="$POSTGRES_USER" --pwfile="$PASSWORD_FILE" >/dev/null
     rm -f "$PASSWORD_FILE"
     trap - EXIT
