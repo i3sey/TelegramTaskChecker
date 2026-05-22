@@ -21,11 +21,21 @@ from src.bot.services.review_service import (
     get_review_by_submission_and_reviewer,
     get_submission_reviews,
 )
-from src.bot.services.submission_service import get_submission
+from src.bot.services.submission_service import (
+    check_submission_availability,
+    create_submission,
+    get_submission,
+    get_user_submissions,
+    replace_submission_content,
+)
 from src.db.models import SubmissionStatus
-from src.bot.services.submission_service import get_user_submissions
 from src.bot.services.user_service import get_user
-from src.bot.keyboards import BTN_P2P_REVIEW, BTN_VOTE
+from src.bot.keyboards import (
+    BTN_P2P_REVIEW,
+    BTN_VOTE,
+    build_post_submission_keyboard,
+    get_keyboard_for_user,
+)
 from src.bot.ui import format_ttl_minutes, voting_type_label
 from src.bot.utils.logging import logger
 from src.bot.handlers.common_review_flow import (
@@ -272,6 +282,166 @@ async def _send_voting_submission(
     await send_submission_content(message, submission, caption)
 
 
+def _is_mandatory_p2p_flow(data: dict) -> bool:
+    return bool(data.get("pending_submission_payload"))
+
+async def _finalize_pending_p2p_submission(
+    message: types.Message,
+    state: FSMContext,
+    campaign,
+    reviewer_id: int,
+) -> bool:
+    data = await state.get_data()
+    payload = data.get("pending_submission_payload")
+    submission_action = data.get("pending_submission_action")
+    existing_submission_id = data.get("pending_existing_submission_id")
+
+    if not payload:
+        await state.clear()
+        await message.answer(
+            "❌ Данные работы потеряны. Отправьте работу заново через /submit."
+        )
+        return False
+
+    try:
+        async with session_scope() as session:
+            action, existing_submission, error_message = await check_submission_availability(
+                campaign,
+                reviewer_id,
+                session,
+            )
+            if action == "forbid":
+                await state.clear()
+                await message.answer(
+                    error_message or "❌ Публикация работы сейчас недоступна."
+                )
+                return False
+
+            if submission_action == "replace":
+                if (
+                    action != "replace"
+                    or existing_submission is None
+                    or existing_submission.id != existing_submission_id
+                ):
+                    await state.clear()
+                    await message.answer(
+                        "❌ Нельзя завершить замену работы: её статус уже изменился. "
+                        "Начните заново через /submit."
+                    )
+                    return False
+
+                submission = await replace_submission_content(
+                    submission=existing_submission,
+                    submission_type=payload["submission_type"],
+                    file_id=payload.get("file_id"),
+                    file_name=payload.get("file_name"),
+                    mime_type=payload.get("mime_type"),
+                    text_content=payload.get("text_content"),
+                    external_url=payload.get("external_url"),
+                    session=session,
+                )
+                success_title = "✅ <b>Работа успешно заменена после P2P-проверки!</b>"
+                success_hint = (
+                    "Что дальше: дождитесь, когда обновлённую работу возьмут на проверку."
+                )
+            else:
+                submission = await create_submission(
+                    campaign_id=campaign.id,
+                    author_id=reviewer_id,
+                    submission_type=payload["submission_type"],
+                    file_id=payload.get("file_id"),
+                    file_name=payload.get("file_name"),
+                    mime_type=payload.get("mime_type"),
+                    text_content=payload.get("text_content"),
+                    external_url=payload.get("external_url"),
+                    session=session,
+                )
+                success_title = "✅ <b>Работа успешно опубликована после P2P-проверки!</b>"
+                success_hint = "Что дальше: дождитесь, когда работу возьмут на проверку."
+
+            user = await get_user(tg_id=reviewer_id, session=session)
+
+        await state.clear()
+        await message.answer(
+            f"{success_title}\n\n"
+            f"📋 Кампания: <b>{campaign.title}</b>\n"
+            f"🆔 Работа: <code>{submission.id}</code>\n"
+            f"📌 Статус: 🟡 <b>Ожидает проверки</b>\n"
+            f"{success_hint}",
+            parse_mode="HTML",
+            reply_markup=build_post_submission_keyboard(),
+        )
+        if user:
+            await message.answer(
+                "Главное меню:",
+                reply_markup=await get_keyboard_for_user(user),
+            )
+        return True
+    except Exception as exc:
+        logger.error(f"Error finalizing pending P2P submission for user {reviewer_id}: {exc}")
+        await message.answer(
+            "❌ Произошла ошибка при публикации работы после P2P-проверки."
+        )
+        return False
+
+async def start_mandatory_p2p_submission_flow(
+    message: types.Message,
+    state: FSMContext,
+    campaign,
+    reviewer_id: int,
+    payload: dict,
+    submission_action: str,
+    existing_submission_id: int | None = None,
+) -> None:
+    async with session_scope() as session:
+        done = await count_reviewer_reviews_for_campaign(
+            reviewer_id,
+            campaign.id,
+            session,
+        )
+
+        await state.update_data(
+            campaign_id=campaign.id,
+            pending_submission_payload=payload,
+            pending_submission_action=submission_action,
+            pending_existing_submission_id=existing_submission_id,
+        )
+
+        if done >= campaign.p2p_reviews_required:
+            submission = None
+        else:
+            submission = await _acquire_submission_for_review(
+                campaign_id=campaign.id,
+                reviewer_id=reviewer_id,
+                ttl_minutes=campaign.ttl_minutes,
+                session=session,
+            )
+
+    if submission is None:
+        await message.answer(
+            "ℹ️ <b>Обязательный этап P2P завершён без дополнительных проверок.</b>\n\n"
+            "Сейчас нет доступных чужих работ для проверки, поэтому ваша работа будет опубликована сразу.",
+            parse_mode="HTML",
+        )
+        await _finalize_pending_p2p_submission(message, state, campaign, reviewer_id)
+        return
+
+    await state.update_data(
+        submission_id=submission.id,
+        score=None,
+        comment_text=None,
+    )
+    await message.answer(
+        "🧑‍🤝‍🧑 <b>Перед публикацией работы нужно выполнить обязательные P2P-проверки.</b>\n\n"
+        f"📋 Кампания: <b>{campaign.title}</b>\n"
+        f"📈 Требуется рецензий: <b>{campaign.p2p_reviews_required}</b>\n"
+        f"✅ Уже выполнено: <b>{done}</b>\n\n"
+        "Сейчас откроется первая доступная работа для проверки.",
+        parse_mode="HTML",
+    )
+    await _send_p2p_submission(message, submission, campaign)
+    await state.set_state(P2PReviewStates.waiting_for_score)
+
 @router.message(Command("p2p"))
 async def cmd_p2p(message: types.Message, state: FSMContext) -> None:
     """Start P2P review flow."""
@@ -504,6 +674,7 @@ async def p2p_confirm(callback: types.CallbackQuery, state: FSMContext) -> None:
     score = data.get("score")
     comment_text = data.get("comment_text")
     reviewer_id = callback.from_user.id
+    mandatory_flow = _is_mandatory_p2p_flow(data)
 
     if not submission_id or score is None or not campaign_id:
         await callback.answer("❌ Не хватает данных для сохранения", show_alert=True)
@@ -518,7 +689,14 @@ async def p2p_confirm(callback: types.CallbackQuery, state: FSMContext) -> None:
             )
             if existing:
                 await queue_service.unlock_submission(int(submission_id))
-                await state.clear()
+                if mandatory_flow:
+                    await state.update_data(
+                        submission_id=None,
+                        score=None,
+                        comment_text=None,
+                    )
+                else:
+                    await state.clear()
                 await callback.message.answer(
                     "⚠️ <b>Вы уже проверяли эту работу.</b>\n\n"
                     "Повторная рецензия не допускается.",
@@ -530,7 +708,14 @@ async def p2p_confirm(callback: types.CallbackQuery, state: FSMContext) -> None:
             submission = await get_submission(submission_id, session)
             if not submission or submission.status != SubmissionStatus.UPLOADED:
                 await queue_service.unlock_submission(int(submission_id))
-                await state.clear()
+                if mandatory_flow:
+                    await state.update_data(
+                        submission_id=None,
+                        score=None,
+                        comment_text=None,
+                    )
+                else:
+                    await state.clear()
                 await callback.message.answer(
                     "⚠️ <b>Работа уже не доступна для проверки.</b>\n\n"
                     "Она могла быть завершена или удалена.",
@@ -542,7 +727,14 @@ async def p2p_confirm(callback: types.CallbackQuery, state: FSMContext) -> None:
             campaign = await get_campaign(campaign_id, session)
             if not campaign or not campaign.is_active:
                 await queue_service.unlock_submission(int(submission_id))
-                await state.clear()
+                if mandatory_flow:
+                    await state.update_data(
+                        submission_id=None,
+                        score=None,
+                        comment_text=None,
+                    )
+                else:
+                    await state.clear()
                 await callback.message.answer(
                     "⚠️ <b>Кампания больше не активна.</b>",
                     parse_mode="HTML",
@@ -566,7 +758,6 @@ async def p2p_confirm(callback: types.CallbackQuery, state: FSMContext) -> None:
             submission_reviews = await get_submission_reviews(submission_id, session)
             submission_review_count = len(submission_reviews)
 
-        await state.clear()
         await queue_service.unlock_submission(int(submission_id))
 
         user_complete = user_done >= campaign.p2p_reviews_required
@@ -580,6 +771,15 @@ async def p2p_confirm(callback: types.CallbackQuery, state: FSMContext) -> None:
             else f"📊 <b>На этой работе {submission_review_count}/{campaign.p2p_reviews_required} рецензий</b>"
         )
 
+        if mandatory_flow:
+            await state.update_data(
+                submission_id=None,
+                score=None,
+                comment_text=None,
+            )
+        else:
+            await state.clear()
+
         await callback.message.answer(
             f"{completion_emoji} "
             + format_review_saved_summary(
@@ -592,24 +792,76 @@ async def p2p_confirm(callback: types.CallbackQuery, state: FSMContext) -> None:
             reply_markup=_build_p2p_continue_keyboard(campaign_id) if not user_complete else None,
         )
 
-        if user_complete:
-            await callback.message.answer(
-                "🎉 <b>Поздравляем!</b>\n\n"
-                "Вы выполнили все требуемые рецензии для этой кампании.",
-                parse_mode="HTML",
-            )
+        if mandatory_flow:
+            if user_complete:
+                await callback.message.answer(
+                    "🎉 <b>Требуемое число рецензий набрано.</b>\n\n"
+                    "Теперь ваша работа будет опубликована.",
+                    parse_mode="HTML",
+                )
+                await _finalize_pending_p2p_submission(
+                    callback.message,
+                    state,
+                    campaign,
+                    reviewer_id,
+                )
+            else:
+                async with session_scope() as session:
+                    next_submission = await _acquire_submission_for_review(
+                        campaign_id=campaign_id,
+                        reviewer_id=reviewer_id,
+                        ttl_minutes=campaign.ttl_minutes,
+                        session=session,
+                    )
+
+                if next_submission is None:
+                    await callback.message.answer(
+                        "ℹ️ <b>Доступные работы для обязательной проверки закончились.</b>\n\n"
+                        "Ваша работа будет опубликована, так как новых подходящих работ больше нет.",
+                        parse_mode="HTML",
+                    )
+                    await _finalize_pending_p2p_submission(
+                        callback.message,
+                        state,
+                        campaign,
+                        reviewer_id,
+                    )
+                else:
+                    await state.update_data(
+                        submission_id=next_submission.id,
+                        score=None,
+                        comment_text=None,
+                    )
+                    await callback.message.answer(
+                        "➡️ <b>Переходим к следующей обязательной проверке.</b>",
+                        parse_mode="HTML",
+                    )
+                    await _send_p2p_submission(
+                        callback.message,
+                        next_submission,
+                        campaign,
+                    )
+                    await state.set_state(P2PReviewStates.waiting_for_score)
+        else:
+            if user_complete:
+                await callback.message.answer(
+                    "🎉 <b>Поздравляем!</b>\n\n"
+                    "Вы выполнили все требуемые рецензии для этой кампании.",
+                    parse_mode="HTML",
+                )
 
         await callback.answer("✅ Рецензия сохранена")
     except Exception as exc:
         logger.error(f"Error saving review {submission_id}: {exc}")
         await queue_service.unlock_submission(int(submission_id))
-        await state.clear()
         await callback.message.answer(
-            "❌ <b>Ошибка при сохранении рецензии.</b>\n\n"
-            "Пожалуйста, попробуйте снова или используйте /p2p.",
+            "❌ <b>Не удалось сохранить рецензию.</b>\n\n"
+            "Введённые оценка и комментарий сохранены в текущем шаге.\n"
+            "Попробуйте подтвердить отправку ещё раз.\n"
+            "Если ошибка повторится, перезапустите сценарий через /p2p.",
             parse_mode="HTML",
         )
-        await callback.answer(show_alert=True)
+        await callback.answer("Ошибка сохранения", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("p2p_next_"))
@@ -652,8 +904,12 @@ async def p2p_next(callback: types.CallbackQuery, state: FSMContext) -> None:
             )
             if not submission:
                 await callback.message.answer(
-                    "📭 <b>Нет доступных работ для проверки.</b>\n\n"
-                    "Все подходящие работы уже заняты или получили нужное количество рецензий.",
+                    "📭 <b>Сейчас нет доступных работ для проверки.</b>\n\n"
+                    "Возможные причины:\n"
+                    "• подходящие работы уже разобраны другими студентами;\n"
+                    "• все работы набрали нужное число рецензий;\n"
+                    "• новых работ в этой кампании пока нет.\n\n"
+                    "Попробуйте вернуться позже или выберите другую активную кампанию.",
                     parse_mode="HTML",
                 )
                 await callback.answer()

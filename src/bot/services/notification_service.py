@@ -120,6 +120,7 @@ class NotificationService:
         reviewer_name: str | None = None,
         is_expert_anon: bool = True,
         voice_file_id: str | None = None,
+        criteria_scores: list[dict[str, int | str]] | None = None,
     ) -> None:
         """
         Notify student about completed review.
@@ -135,11 +136,29 @@ class NotificationService:
         safe_comment = html.escape(comment) if comment else None
         safe_reviewer = html.escape(reviewer_name) if reviewer_name else None
 
+        criteria_lines: list[str] = []
+        for item in criteria_scores or []:
+            if not isinstance(item, dict):
+                continue
+
+            criterion_name = html.escape(str(item.get("name") or "").strip())
+            criterion_score = item.get("score")
+
+            if not criterion_name or criterion_score in (None, ""):
+                continue
+
+            criteria_lines.append(f"• {criterion_name} — <b>{criterion_score}</b>")
+
         message_parts = [
             "📋 <b>Ваша работа проверена!</b>\n\n",
             f"Кампания: <b>{safe_campaign}</b>\n",
-            f"Оценка: <b>{score}</b>\n",
         ]
+
+        if criteria_lines:
+            message_parts.append("Критерии:\n")
+            message_parts.append("\n".join(criteria_lines) + "\n")
+
+        message_parts.append(f"Итоговая оценка: <b>{score}</b>\n")
 
         if not is_expert_anon and safe_reviewer:
             message_parts.append(f"Проверил(а): <b>{safe_reviewer}</b>\n")

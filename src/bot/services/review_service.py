@@ -1,4 +1,6 @@
 """Review service for database operations."""
+import json
+
 from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +20,7 @@ class ReviewService:
         session: AsyncSession,
         voice_file_id: str | None = None,
         ban_comment: str | None = None,
+        criteria_scores: list[dict[str, int | str]] | None = None,
     ) -> Review:
         """
         Create a new review for a submission.
@@ -30,6 +33,7 @@ class ReviewService:
             session: Database session
             voice_file_id: Optional voice file ID
             ban_comment: Optional comment explaining why expert wants to ban student
+            criteria_scores: Optional ordered list of per-criterion scores
 
         Returns:
             Created Review object
@@ -38,6 +42,11 @@ class ReviewService:
             submission_id=submission_id,
             reviewer_id=reviewer_id,
             score=score,
+            criteria_scores=(
+                json.dumps(criteria_scores, ensure_ascii=False)
+                if criteria_scores is not None
+                else None
+            ),
             comment_text=comment_text,
             voice_file_id=voice_file_id,
             ban_comment=ban_comment,
@@ -255,10 +264,18 @@ async def create_review(
     session: AsyncSession,
     voice_file_id: str | None = None,
     ban_comment: str | None = None,
+    criteria_scores: list[dict[str, int | str]] | None = None,
 ) -> Review:
     """Create a new review."""
     return await ReviewService.create_review(
-        submission_id, reviewer_id, score, comment_text, session, voice_file_id, ban_comment
+        submission_id,
+        reviewer_id,
+        score,
+        comment_text,
+        session,
+        voice_file_id,
+        ban_comment,
+        criteria_scores,
     )
 
 

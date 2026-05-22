@@ -6,7 +6,6 @@ from typing import Any
 from aiogram import Bot, F, Router, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import BufferedInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -16,12 +15,12 @@ from src.bot.keyboards import (
     BTN_EXPORT,
     BTN_MORE,
     BTN_MY_CAMPAIGNS,
-    BTN_SET_CRITERIA,
     BTN_VIEW_RESULTS,
     build_organizer_more_keyboard,
     get_keyboard_for_user,
 )
 from src.bot.services.campaign_service import (
+    CampaignService,
     get_campaign_export_rows,
     get_campaign_results,
     get_completed_campaigns_for_export,
@@ -32,7 +31,7 @@ from src.bot.utils.logging import logger
 from src.db.engine import session_scope
 from src.db.models import UserRole
 
-EXPORT_HEADERS = [
+EXPORT_BASE_HEADERS = [
     "ID кампании",
     "Название кампании",
     "Тип кампании",
@@ -71,34 +70,62 @@ def _format_export_value(value: Any) -> Any:
         return ""
     return value
 
+def _extract_campaign_criteria_names(rows: list[dict[str, Any]]) -> list[str]:
+    """Extract ordered campaign criteria names from export rows."""
+    for row in rows:
+        criteria_names = row.get("criteria_names") or row.get("criteria") or []
+        if criteria_names:
+            return [str(name).strip() for name in criteria_names if str(name).strip()]
+    return []
+
+def _build_export_headers(rows: list[dict[str, Any]]) -> list[str]:
+    """Build spreadsheet headers with named dynamic criteria columns."""
+    criteria_names = _extract_campaign_criteria_names(rows)
+    return EXPORT_BASE_HEADERS + [
+        f"Критерий: {criterion_name} — оценка эксперта"
+        for criterion_name in criteria_names
+    ]
+
 def _build_export_rows(rows: list[dict[str, Any]]) -> list[list[Any]]:
     """Convert export row dictionaries into human-readable spreadsheet rows."""
-    return [
-        [
-            _format_export_value(row.get("campaign_id")),
-            _format_export_value(row.get("campaign_title")),
-            CAMPAIGN_TYPE_LABELS.get(
-                str(row.get("campaign_type") or ""),
-                _format_export_value(row.get("campaign_type")),
-            ),
-            _format_export_value(row.get("submission_id")),
-            SUBMISSION_STATUS_LABELS.get(
-                str(row.get("submission_status") or ""),
-                _format_export_value(row.get("submission_status")),
-            ),
-            _format_export_value(row.get("submission_created_at")),
-            _format_export_value(row.get("author_tg_id")),
-            _format_export_value(row.get("author_full_name")),
-            _format_export_value(row.get("author_study_group")),
-            _format_export_value(row.get("reviewer_tg_id")),
-            _format_export_value(row.get("reviewer_full_name")),
-            _format_export_value(row.get("score")),
-            _format_export_value(row.get("comment_text")),
-            _format_export_value(row.get("ban_comment")),
-            _format_export_value(row.get("review_created_at")),
-        ]
-        for row in rows
-    ]
+    criteria_names = _extract_campaign_criteria_names(rows)
+
+    export_rows: list[list[Any]] = []
+    for row in rows:
+        criteria_scores_map = CampaignService.map_criteria_scores_by_name(
+            row.get("criteria_scores")
+        )
+        export_rows.append(
+            [
+                _format_export_value(row.get("campaign_id")),
+                _format_export_value(row.get("campaign_title")),
+                CAMPAIGN_TYPE_LABELS.get(
+                    str(row.get("campaign_type") or ""),
+                    _format_export_value(row.get("campaign_type")),
+                ),
+                _format_export_value(row.get("submission_id")),
+                SUBMISSION_STATUS_LABELS.get(
+                    str(row.get("submission_status") or ""),
+                    _format_export_value(row.get("submission_status")),
+                ),
+                _format_export_value(row.get("submission_created_at")),
+                _format_export_value(row.get("author_tg_id")),
+                _format_export_value(row.get("author_full_name")),
+                _format_export_value(row.get("author_study_group")),
+                _format_export_value(row.get("reviewer_tg_id")),
+                _format_export_value(row.get("reviewer_full_name")),
+                _format_export_value(row.get("score")),
+                _format_export_value(row.get("comment_text")),
+                _format_export_value(row.get("ban_comment")),
+                _format_export_value(row.get("review_created_at")),
+                *[
+                    _format_export_value(criteria_scores_map.get(criterion_name, ""))
+                    for criterion_name in criteria_names
+                ],
+            ]
+        )
+
+    return export_rows
 
 def _build_completed_campaigns_export_keyboard(campaigns: list[Any]) -> types.InlineKeyboardMarkup:
     """Build inline keyboard for completed campaigns export."""
@@ -116,11 +143,6 @@ def _build_completed_campaigns_export_keyboard(campaigns: list[Any]) -> types.In
 router = Router()
 router.name = "organizer_router"
 
-class OrganizerCriteriaState(StatesGroup):
-    """FSM for collecting organizer evaluation criteria."""
-
-    awaiting_criteria = State()
-
 @router.message(Command("invites"))
 async def cmd_invites(message: types.Message) -> None:
     """Explain that campaign invites are generated automatically."""
@@ -136,62 +158,6 @@ async def cmd_invites(message: types.Message) -> None:
         "Чтобы получить новые ссылки, создайте кампанию или откройте её из списка кампаний.",
         parse_mode="HTML",
     )
-
-@router.message(Command("set_criteria"))
-async def cmd_set_criteria(
-    message: types.Message, state: FSMContext
-) -> None:
-    """
-    Handle /set_criteria command to define evaluation criteria.
-    
-    Args:
-        message: Telegram message object
-        state: FSM context for managing conversation state
-    """
-    async with session_scope() as session:
-        user = await get_user(tg_id=message.from_user.id, session=session)
-        if not user or user.role not in (UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER):
-            await message.answer("❌ Эта команда доступна только организаторам.")
-            return
-
-    criteria_text = (
-        "📋 <b>Критерии оценки</b>\n\n"
-        "Отправьте каждый критерий с новой строки.\n\n"
-        "Пример:\n"
-        "Корректность\n"
-        "Качество решения\n"
-        "Оформление\n\n"
-        "Отправьте список критериев:"
-    )
-    
-    await message.answer(criteria_text, parse_mode="HTML")
-    await state.set_state(OrganizerCriteriaState.awaiting_criteria)
-
-@router.message(OrganizerCriteriaState.awaiting_criteria)
-async def process_criteria(message: types.Message, state: FSMContext) -> None:
-    """Process evaluation criteria from organizer."""
-    if message.text.lower().strip() == "skip":
-        criteria = [
-            "Корректность",
-            "Качество решения",
-            "Оформление",
-            "Тестирование",
-            "Производительность",
-        ]
-        source = "стандартный набор"
-    else:
-        criteria = [c.strip() for c in message.text.split("\n") if c.strip()]
-        source = "пользовательский набор"
-
-    criteria_list = "\n".join(f"✓ {c}" for c in criteria)
-
-    await message.answer(
-        f"✅ <b>Критерии сохранены</b> ({source})\n\n"
-        f"{criteria_list}\n\n"
-        "Эксперты увидят эти критерии во время проверки.",
-        parse_mode="HTML",
-    )
-    await state.clear()
 
 def _format_results_text(results: list[dict]) -> str:
     if not results:
@@ -324,10 +290,6 @@ async def btn_my_campaigns(message: types.Message) -> None:
 
     await cmd_my_campaigns(message)
 
-@router.message(F.text == BTN_SET_CRITERIA)
-async def btn_set_criteria(message: types.Message, state: FSMContext) -> None:
-    await cmd_set_criteria(message, state)
-
 @router.message(F.text == BTN_VIEW_RESULTS)
 async def btn_view_results(message: types.Message) -> None:
     await cmd_view_results(message)
@@ -347,14 +309,6 @@ async def btn_more(message: types.Message) -> None:
         parse_mode="HTML",
         reply_markup=build_organizer_more_keyboard(),
     )
-
-@router.callback_query(F.data == "org_menu_set_criteria")
-async def org_menu_set_criteria(callback: types.CallbackQuery, state: FSMContext) -> None:
-    if not callback.message:
-        await callback.answer("❌ Ошибка: не удалось получить сообщение", show_alert=True)
-        return
-    await cmd_set_criteria(callback.message, state)
-    await callback.answer()
 
 @router.callback_query(F.data == "org_menu_view_results")
 async def org_menu_view_results(callback: types.CallbackQuery) -> None:
@@ -405,11 +359,14 @@ async def org_export_campaign(callback: types.CallbackQuery) -> None:
     await callback.answer("⏳ Готовлю XLSX...")
 
     try:
+        export_header = _build_export_headers(export_rows)
+        export_table_rows = _build_export_rows(export_rows)
+
         filename, file_buffer, written_rows = xlsx_export_service.build_export_file(
             campaign_id=campaign.id,
             campaign_title=campaign.title,
-            rows=_build_export_rows(export_rows),
-            header=EXPORT_HEADERS,
+            rows=export_table_rows,
+            header=export_header,
         )
         export_file = BufferedInputFile(
             file=file_buffer.getvalue(),

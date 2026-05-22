@@ -110,6 +110,12 @@ async def _ensure_schema(conn) -> None:
             "WHERE campaign_deadline_at IS NULL"
         )
     )
+    await conn.execute(
+        text(
+            "ALTER TABLE reviews "
+            "ADD COLUMN IF NOT EXISTS criteria_scores TEXT"
+        )
+    )
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

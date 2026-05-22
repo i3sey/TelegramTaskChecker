@@ -1,4 +1,5 @@
 """Campaign service for database operations."""
+import json
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
@@ -18,6 +19,97 @@ from src.bot.utils.logging import logger
 
 class CampaignService:
     """Service for campaign-related database operations."""
+
+    @staticmethod
+    def serialize_criteria(criteria: list[str] | None) -> str | None:
+        """Serialize criteria list into JSON string for storage."""
+        if not criteria:
+            return None
+        normalized = [item.strip() for item in criteria if item and item.strip()]
+        if not normalized:
+            return None
+        return json.dumps(normalized, ensure_ascii=False)
+
+    @staticmethod
+    def deserialize_criteria(criteria_text: str | None) -> list[str]:
+        """Deserialize criteria JSON string into list of strings."""
+        if not criteria_text:
+            return []
+
+        try:
+            data = json.loads(criteria_text)
+        except (TypeError, ValueError):
+            return []
+
+        if not isinstance(data, list):
+            return []
+
+        return [str(item).strip() for item in data if str(item).strip()]
+
+    @staticmethod
+    def deserialize_criteria_scores(criteria_scores_text: str | None) -> list[dict[str, int | str]]:
+        """Deserialize review criteria scores JSON string into normalized list."""
+        if not criteria_scores_text:
+            return []
+
+        try:
+            data = json.loads(criteria_scores_text)
+        except (TypeError, ValueError):
+            return []
+
+        if not isinstance(data, list):
+            return []
+
+        normalized: list[dict[str, int | str]] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+
+            name = str(item.get("name", "")).strip()
+            score = item.get("score")
+
+            if not name:
+                continue
+
+            if isinstance(score, bool):
+                continue
+
+            if not isinstance(score, int):
+                try:
+                    score = int(score)
+                except (TypeError, ValueError):
+                    continue
+
+            normalized.append({"name": name, "score": score})
+
+        return normalized
+
+    @staticmethod
+    def build_empty_criteria_scores(criteria: list[str] | None) -> list[dict[str, int | str]]:
+        """Build empty ordered criteria score objects for a campaign."""
+        return [{"name": name, "score": ""} for name in (criteria or []) if name]
+
+    @staticmethod
+    def map_criteria_scores_by_name(
+        criteria_scores: list[dict[str, int | str]] | None,
+    ) -> dict[str, int | str]:
+        """Map criteria scores list into criterion name -> score dictionary."""
+        result: dict[str, int | str] = {}
+        for item in criteria_scores or []:
+            if not isinstance(item, dict):
+                continue
+
+            name = str(item.get("name", "")).strip()
+            if not name:
+                continue
+
+            score = item.get("score")
+            if score in (None, ""):
+                continue
+
+            result[name] = score
+
+        return result
 
     @staticmethod
     def _campaign_deadline(campaign: Campaign) -> datetime | None:
@@ -142,6 +234,7 @@ class CampaignService:
         allowed_extensions: str | None = None,
         allow_resubmission_after_review: bool = False,
         allow_resubmission_before_review: bool = False,
+        criteria_text: str | None = None,
     ) -> Campaign:
         """
         Create a new campaign.
@@ -171,6 +264,7 @@ class CampaignService:
             voting_type=voting_type,
             submission_format=submission_format,
             allowed_extensions=allowed_extensions,
+            criteria_text=criteria_text,
             allow_resubmission_after_review=allow_resubmission_after_review,
             allow_resubmission_before_review=allow_resubmission_before_review,
         )
@@ -293,6 +387,7 @@ class CampaignService:
                 reviewer.tg_id,
                 reviewer.full_name,
                 Review.score,
+                Review.criteria_scores,
                 Review.comment_text,
                 Review.ban_comment,
                 Review.created_at,
@@ -305,6 +400,8 @@ class CampaignService:
             .where(Campaign.id == campaign_id)
             .order_by(Submission.created_at.asc(), Review.created_at.asc())
         )
+
+        criteria_names = CampaignService.deserialize_criteria(campaign.criteria_text)
 
         rows: list[dict] = []
         for row in export_result.all():
@@ -328,9 +425,12 @@ class CampaignService:
                     "reviewer_tg_id": reviewer_tg_id,
                     "reviewer_full_name": reviewer_full_name,
                     "score": row[12],
-                    "comment_text": row[13],
-                    "ban_comment": row[14],
-                    "review_created_at": row[15],
+                    "criteria_names": criteria_names,
+                    "criteria_scores": CampaignService.deserialize_criteria_scores(row[13]),
+                    "comment_text": row[14],
+                    "ban_comment": row[15],
+                    "review_created_at": row[16],
+                    "criteria": criteria_names,
                 }
             )
 
@@ -493,6 +593,7 @@ async def create_campaign(
     allowed_extensions: str | None = None,
     allow_resubmission_after_review: bool = False,
     allow_resubmission_before_review: bool = False,
+    criteria_text: str | None = None,
 ) -> Campaign:
     """Create a new campaign."""
     return await CampaignService.create_campaign(
@@ -511,6 +612,7 @@ async def create_campaign(
         allowed_extensions,
         allow_resubmission_after_review,
         allow_resubmission_before_review,
+        criteria_text,
     )
 
 async def update_campaign(

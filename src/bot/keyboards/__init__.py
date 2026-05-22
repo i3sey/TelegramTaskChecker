@@ -29,7 +29,6 @@ BTN_EXPERT_STATS = "📈 Статистика"
 
 BTN_CREATE_CAMPAIGN = "🆕 Создать кампанию"
 BTN_MY_CAMPAIGNS = "📁 Мои кампании"
-BTN_SET_CRITERIA = "⚙️ Критерии"
 BTN_VIEW_RESULTS = "🔎 Результаты"
 BTN_EXPORT = "📤 Экспорт"
 BTN_ANALYTICS = "📊 Аналитика"
@@ -90,7 +89,6 @@ def build_campaign_anonymous_keyboard() -> ReplyKeyboardMarkup:
 def build_organizer_more_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=BTN_SET_CRITERIA, callback_data="org_menu_set_criteria")],
             [InlineKeyboardButton(text=BTN_VIEW_RESULTS, callback_data="org_menu_view_results")],
             [InlineKeyboardButton(text=BTN_EXPORT, callback_data="org_menu_export")],
             [InlineKeyboardButton(text=BTN_ANALYTICS, callback_data="org_menu_analytics")],
@@ -254,6 +252,14 @@ def build_comment_skip_keyboard() -> InlineKeyboardMarkup:
         ]
     )
 
+def build_skip_criteria_keyboard() -> InlineKeyboardMarkup:
+    """Build keyboard for skipping the whole criteria scoring stage."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⏭️ Пропустить критерии", callback_data="skip_criteria_scores")],
+        ]
+    )
+
 def build_review_confirmation_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -329,7 +335,7 @@ def get_keyboard_for_role(role: UserRole):
             [
                 [BTN_TAKE, BTN_QUEUE, BTN_EXPERT_STATS],
                 [BTN_CREATE_CAMPAIGN, BTN_MY_CAMPAIGNS, BTN_EXPORT],
-                [BTN_VIEW_RESULTS, BTN_ANALYTICS, BTN_SET_CRITERIA],
+                [BTN_VIEW_RESULTS, BTN_ANALYTICS],
                 [BTN_PROFILE, BTN_ROLE, BTN_HELP],
             ]
         )
@@ -337,7 +343,7 @@ def get_keyboard_for_role(role: UserRole):
         return _mk_markup(
             [
                 [BTN_CREATE_CAMPAIGN, BTN_MY_CAMPAIGNS, BTN_EXPORT],
-                [BTN_VIEW_RESULTS, BTN_ANALYTICS, BTN_SET_CRITERIA],
+                [BTN_VIEW_RESULTS, BTN_ANALYTICS],
                 [BTN_PROFILE, BTN_ROLE, BTN_HELP],
             ]
         )

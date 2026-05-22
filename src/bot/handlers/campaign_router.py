@@ -20,6 +20,7 @@ from src.db.models import (
 )
 from src.bot.services.user_service import get_user
 from src.bot.services.campaign_service import (
+    CampaignService,
     get_campaign,
     get_active_campaigns,
     create_campaign,
@@ -139,6 +140,12 @@ def _build_inline_keyboard(rows: list[list[tuple[str, str]]]):
                 for label, data in row
             ]
         )
+    builder.row(
+        types.InlineKeyboardButton(
+            text="❌ Отмена",
+            callback_data="back_to_menu",
+        )
+    )
     return builder.as_markup()
 
 
@@ -151,6 +158,23 @@ def _submission_format_label(submission_format: SubmissionFormat) -> str:
         SubmissionFormat.LINK: "Ссылка",
     }
     return labels.get(submission_format, submission_format.value)
+
+def _parse_criteria_lines(text: str | None) -> list[str]:
+    if not text:
+        return []
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+def _criteria_summary_text(criteria: list[str]) -> str:
+    if not criteria:
+        return "не заданы"
+    if len(criteria) <= 2:
+        return ", ".join(criteria)
+    return f"{criteria[0]}, {criteria[1]} и ещё {len(criteria) - 2}"
+
+def _criteria_count_line(criteria: list[str]) -> str:
+    if not criteria:
+        return "\n🧾 Критерии: не заданы"
+    return f"\n🧾 Критерии ({len(criteria)}): {_criteria_summary_text(criteria)}"
 
 def _build_submission_format_keyboard():
     return _build_inline_keyboard([
@@ -467,6 +491,10 @@ async def process_campaign_title(message: types.Message, state: FSMContext):
             text=get_campaign_type_display(ctype),
             callback_data=f"ctype_{ctype.value}"
         ))
+    builder.add(types.InlineKeyboardButton(
+        text="❌ Отмена",
+        callback_data="back_to_menu",
+    ))
     builder.adjust(1)
 
     await message.answer(
@@ -485,6 +513,31 @@ async def process_campaign_type_message(message: types.Message, state: FSMContex
         parse_mode="HTML",
     )
 
+
+@router.callback_query(
+    StateFilter(
+        CampaignCreationStates.waiting_for_type,
+        CampaignCreationStates.waiting_for_p2p_reviews,
+        CampaignCreationStates.waiting_for_voting_type,
+        CampaignCreationStates.waiting_for_min_score,
+        CampaignCreationStates.waiting_for_max_score,
+        CampaignCreationStates.waiting_for_ttl,
+        CampaignCreationStates.waiting_for_campaign_deadline_days,
+        CampaignCreationStates.waiting_for_submission_format,
+        CampaignCreationStates.waiting_for_allow_resubmission_before_review,
+        CampaignCreationStates.waiting_for_allow_resubmission_after_review,
+        CampaignCreationStates.waiting_for_anonymous,
+    ),
+    F.data == "back_to_menu",
+)
+async def cancel_campaign_creation(callback: types.CallbackQuery, state: FSMContext):
+    if not callback.message:
+        await callback.answer()
+        return
+
+    await state.clear()
+    await callback.message.edit_text("❌ Создание кампании отменено.")
+    await callback.answer()
 
 @router.callback_query(StateFilter(CampaignCreationStates.waiting_for_type))
 async def process_campaign_type_callback(callback: types.CallbackQuery, state: FSMContext):
@@ -928,12 +981,16 @@ async def process_allow_resubmission_after_review_callback(
     )
 
     await callback.message.edit_text(
-        "🔒 <b>Сделать рецензии анонимными?</b>\n"
-        "Если выбрать «Да», автор не увидит имя проверяющего.",
-        reply_markup=_build_anonymous_keyboard(),
+        "🧾 <b>Введите критерии оценки (необязательно):</b>\n"
+        "Один критерий — одна строка.\n\n"
+        "Пример:\n"
+        "Оформление\n"
+        "Аргументация\n"
+        "Полнота ответа\n\n"
+        "Если критерии не нужны, отправьте сообщение <code>Пропустить</code>.",
         parse_mode="HTML",
     )
-    await state.set_state(CampaignCreationStates.waiting_for_anonymous)
+    await state.set_state(CampaignCreationStates.waiting_for_criteria)
     await callback.answer()
 
 @router.message(
@@ -945,6 +1002,33 @@ async def process_allow_resubmission_after_review_message(message: types.Message
         reply_markup=_build_anonymous_keyboard(),
         parse_mode="HTML",
     )
+
+@router.message(StateFilter(CampaignCreationStates.waiting_for_criteria))
+async def process_campaign_criteria(message: types.Message, state: FSMContext):
+    criteria_input = (message.text or "").strip()
+    if criteria_input.lower() in {"пропустить", "skip", "-", "нет"}:
+        await state.update_data(criteria_text=None, criteria_count=0)
+    else:
+        criteria = _parse_criteria_lines(criteria_input)
+        if not criteria:
+            await message.answer(
+                "❌ Введите хотя бы один непустой критерий в отдельных строках "
+                "или отправьте <code>Пропустить</code>.",
+                parse_mode="HTML",
+            )
+            return
+        await state.update_data(
+            criteria_text=CampaignService.serialize_criteria(criteria),
+            criteria_count=len(criteria),
+        )
+
+    await message.answer(
+        "🔒 <b>Сделать рецензии анонимными?</b>\n"
+        "Если выбрать «Да», автор не увидит имя проверяющего.",
+        reply_markup=_build_anonymous_keyboard(),
+        parse_mode="HTML",
+    )
+    await state.set_state(CampaignCreationStates.waiting_for_anonymous)
 
 @router.callback_query(StateFilter(CampaignCreationStates.waiting_for_anonymous))
 async def process_campaign_anonymous_callback(callback: types.CallbackQuery, state: FSMContext):
@@ -959,6 +1043,7 @@ async def process_campaign_anonymous_callback(callback: types.CallbackQuery, sta
     tg_id = callback.from_user.id
     campaign_deadline_days = int(data.get("campaign_deadline_days", 7))
     campaign_deadline_at = _campaign_deadline_from_days(campaign_deadline_days)
+    criteria = CampaignService.deserialize_criteria(data.get("criteria_text"))
 
     async with session_scope() as session:
         try:
@@ -984,6 +1069,7 @@ async def process_campaign_anonymous_callback(callback: types.CallbackQuery, sta
                     "allow_resubmission_before_review",
                     False,
                 ),
+                criteria_text=data.get("criteria_text"),
                 session=session,
             )
 
@@ -1014,6 +1100,7 @@ async def process_campaign_anonymous_callback(callback: types.CallbackQuery, sta
                 f"📅 Дедлайн сдачи работ: {campaign_deadline_at.astimezone().strftime('%d.%m.%Y %H:%M')}\n"
                 f"🔒 Анонимность: {'Да' if is_anon else 'Нет'}\n"
                 f"📥 Формат сдачи: {_submission_format_label(campaign.submission_format)}\n"
+                f"🧾 Критерии: {_criteria_summary_text(criteria)}\n"
                 f"♻️ Замена до проверки: {'Да' if campaign.allow_resubmission_before_review else 'Нет'}\n"
                 f"🔁 Пересдача после проверки: {'Да' if campaign.allow_resubmission_after_review else 'Нет'}"
                 f"{extra_lines}"
@@ -1045,6 +1132,7 @@ async def process_anonymous_message(message: types.Message, state: FSMContext):
     tg_id = message.from_user.id
     campaign_deadline_days = int(data.get("campaign_deadline_days", 7))
     campaign_deadline_at = _campaign_deadline_from_days(campaign_deadline_days)
+    criteria = CampaignService.deserialize_criteria(data.get("criteria_text"))
 
     async with session_scope() as session:
         try:
@@ -1071,6 +1159,7 @@ async def process_anonymous_message(message: types.Message, state: FSMContext):
                     "allow_resubmission_before_review",
                     False,
                 ),
+                criteria_text=data.get("criteria_text"),
             )
 
             bot_username = (await message.bot.get_me()).username
@@ -1098,6 +1187,7 @@ async def process_anonymous_message(message: types.Message, state: FSMContext):
                 f"📅 Дедлайн сдачи работ: {campaign_deadline_at.astimezone().strftime('%d.%m.%Y %H:%M')}\n"
                 f"🔒 Анонимность: {'Да' if is_anon else 'Нет'}\n"
                 f"📥 Формат сдачи: {_submission_format_label(campaign.submission_format)}\n"
+                f"🧾 Критерии: {_criteria_summary_text(criteria)}\n"
                 f"♻️ Замена до проверки: {'Да' if campaign.allow_resubmission_before_review else 'Нет'}\n"
                 f"🔁 Пересдача после проверки: {'Да' if campaign.allow_resubmission_after_review else 'Нет'}"
                 f"{extra_lines}"
@@ -1145,6 +1235,10 @@ async def cmd_campaigns(message: types.Message):
                 text += f"   👥 Проверок на участника: {campaign.p2p_reviews_required}\n"
             if campaign.type == CampaignType.VOTING:
                 text += f"   🗳 Тип голосования: {voting_type_label(campaign.voting_type)}\n"
+            text += (
+                f"   🧾 Критерии: "
+                f"{_criteria_summary_text(CampaignService.deserialize_criteria(campaign.criteria_text))}\n"
+            )
             text += f"   📥 Формат сдачи: {_submission_format_label(campaign.submission_format)}\n"
             text += (
                 f"   ♻️ Замена до проверки: "
@@ -1311,7 +1405,7 @@ async def menu_org_create_campaign(callback: types.CallbackQuery, state: FSMCont
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("finish_campaign_"))
+@router.callback_query(F.data.regexp(r"^finish_campaign_\d+$"))
 async def finish_campaign(callback: types.CallbackQuery) -> None:
     if not callback.message:
         await callback.answer("❌ Ошибка: не удалось получить сообщение", show_alert=True)
@@ -1554,6 +1648,8 @@ async def process_submission_file(message: types.Message, state: FSMContext):
         callback_data="back_to_menu"
     ))
 
+    should_clear_state = True
+
     async with session_scope() as session:
         try:
             campaign = await get_campaign(campaign_id, session)
@@ -1651,6 +1747,7 @@ async def submission_confirm(callback: types.CallbackQuery, state: FSMContext):
         create_submission,
         replace_submission_content,
     )
+    from src.bot.handlers.peer_router import start_mandatory_p2p_submission_flow
 
     if not callback.message:
         await callback.answer()
@@ -1668,6 +1765,8 @@ async def submission_confirm(callback: types.CallbackQuery, state: FSMContext):
         await state.clear()
         await callback.answer()
         return
+
+    should_clear_state = True
 
     async with session_scope() as session:
         try:
@@ -1687,6 +1786,50 @@ async def submission_confirm(callback: types.CallbackQuery, state: FSMContext):
                 )
                 await state.clear()
                 await callback.answer()
+                return
+
+            if campaign.type == CampaignType.P2P:
+                if submission_action == "replace":
+                    if (
+                        action != "replace"
+                        or existing_submission is None
+                        or existing_submission_id != existing_submission.id
+                    ):
+                        await callback.message.answer(
+                            "❌ Нельзя заменить работу: её статус уже изменился. "
+                            "Начните отправку заново."
+                        )
+                        await state.clear()
+                        await callback.answer()
+                        return
+
+                    pending_submission_id = existing_submission.id
+                else:
+                    pending_submission_id = None
+
+                await state.update_data(
+                    pending_submission_payload=payload,
+                    pending_submission_action=submission_action or action,
+                    pending_existing_submission_id=pending_submission_id,
+                )
+
+                await callback.message.answer(
+                    "🧑‍🤝‍🧑 <b>P2P-кампания требует обязательных взаимных проверок.</b>\n\n"
+                    "Перед публикацией вашей работы нужно проверить чужие работы."
+                    " После завершения обязательного этапа работа будет сохранена автоматически.",
+                    parse_mode="HTML",
+                )
+                should_clear_state = False
+                await callback.answer()
+                await start_mandatory_p2p_submission_flow(
+                    callback.message,
+                    state,
+                    campaign,
+                    tg_id,
+                    payload,
+                    submission_action or action,
+                    pending_submission_id,
+                )
                 return
 
             if submission_action == "replace":
@@ -1760,7 +1903,8 @@ async def submission_confirm(callback: types.CallbackQuery, state: FSMContext):
                 "❌ Произошла ошибка при сохранении работы."
             )
         finally:
-            await state.clear()
+            if should_clear_state:
+                await state.clear()
 
     await callback.answer()
 

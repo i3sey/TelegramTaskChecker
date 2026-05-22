@@ -11,7 +11,7 @@ from src.db.models import UserRole, SubmissionStatus, SubmissionFormat, User, Ca
 from src.bot.services.user_service import get_user, get_users_by_role
 from src.bot.services.submission_service import get_submission, update_submission_status
 from src.bot.services.review_service import create_review, count_pending_submissions, get_submission_pending
-from src.bot.services.campaign_service import get_campaign
+from src.bot.services.campaign_service import CampaignService, get_campaign
 from src.bot.services.queue_service import queue_service, QueueService
 from src.bot.services.notification_service import NotificationService
 from src.bot.services.voice_transcription_service import (
@@ -33,7 +33,6 @@ from src.bot.keyboards import (
     build_post_review_keyboard,
     build_voice_comment_action_keyboard,
     build_transcribed_comment_keyboard,
-    build_take_submission_confirmation_keyboard,
     get_keyboard_for_role,
 )
 from src.bot.ui import format_ttl_minutes
@@ -59,6 +58,7 @@ class ExpertReviewState(StatesGroup):
     """FSM states for expert review workflow."""
     idle = State()
     reviewing_submission = State()
+    waiting_for_criteria_score = State()
     waiting_for_score = State()
     waiting_for_comment = State()
     waiting_for_voice_comment_action = State()
@@ -233,13 +233,101 @@ async def _send_submission_content(
             fallback += f"\n📄 Файл: <b>{submission.file_name}</b>"
         await message.answer(fallback, parse_mode="HTML")
 
+async def _prompt_for_total_score(message: types.Message, campaign: Campaign) -> None:
+    """Ask expert for final score."""
+    await message.answer(
+        "⬇️ Введите итоговую оценку числом.\n"
+        f"Допустимый диапазон: {campaign.min_score}–{campaign.max_score}.",
+    )
+    await message.answer(
+        "Выберите итоговую оценку кнопкой или введите вручную:",
+        reply_markup=build_quick_score_keyboard(),
+    )
+
+def _build_criteria_prompt_text(
+    campaign: Campaign,
+    criteria: list[str],
+    criteria_index: int,
+) -> str:
+    """Build a single master-style text for criteria scoring."""
+    current_name = criteria[criteria_index]
+    criteria_lines: list[str] = []
+
+    for index, criterion in enumerate(criteria):
+        prefix = "➡️" if index == criteria_index else "•"
+        if index < criteria_index:
+            prefix = "✅"
+        criteria_lines.append(f"{prefix} {criterion}")
+
+    return (
+        f"📋 <b>Критерии проверки</b>\n\n"
+        f"{chr(10).join(criteria_lines)}\n\n"
+        f"<b>Сейчас оценивается:</b> {current_name}\n"
+        f"<b>Шаг:</b> {criteria_index + 1} из {len(criteria)}\n"
+        f"<b>Диапазон:</b> {campaign.min_score}–{campaign.max_score}\n\n"
+        "Выберите оценку кнопкой ниже или введите её сообщением."
+    )
+
+async def _show_or_update_criteria_prompt(
+    message: types.Message,
+    state: FSMContext,
+    campaign: Campaign,
+    criteria: list[str],
+    criteria_index: int,
+) -> None:
+    """Show one criteria message and update it instead of sending many messages."""
+    prompt_text = _build_criteria_prompt_text(campaign, criteria, criteria_index)
+    data = await state.get_data()
+    prompt_message_id = data.get("criteria_prompt_message_id")
+
+    if prompt_message_id:
+        try:
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=prompt_message_id,
+                text=prompt_text,
+                parse_mode="HTML",
+                reply_markup=build_quick_score_keyboard(),
+            )
+            return
+        except Exception as exc:
+            logger.warning(f"Failed to update criteria prompt message: {exc}")
+
+    sent_message = await message.answer(
+        prompt_text,
+        parse_mode="HTML",
+        reply_markup=build_quick_score_keyboard(),
+    )
+    await state.update_data(criteria_prompt_message_id=sent_message.message_id)
+
+async def _start_scoring_flow(
+    message: types.Message,
+    state: FSMContext,
+    campaign: Campaign,
+    criteria: list[str],
+) -> None:
+    """Start scoring flow for criteria or final score."""
+    if criteria:
+        await state.set_state(ExpertReviewState.waiting_for_criteria_score)
+        await _show_or_update_criteria_prompt(message, state, campaign, criteria, 0)
+        return
+
+    await state.set_state(ExpertReviewState.waiting_for_score)
+    await _prompt_for_total_score(message, campaign)
+
 async def send_submission_to_expert(
     message: types.Message,
     submission,
     campaign,
-    author: User
+    author: User,
+    state: FSMContext,
 ) -> None:
-    """Send submission to expert with scoring interface."""
+    """Send submission to expert and start scoring interface."""
+    criteria = CampaignService.deserialize_criteria(campaign.criteria_text)
+    criteria_block = ""
+    if criteria:
+        criteria_block = "\n📋 <b>Критерии:</b>\n" + "\n".join(f"• {criterion}" for criterion in criteria)
+
     caption = (
         f"📄 <b>Новая работа для проверки</b>\n\n"
         f"📋 Кампания: <b>{campaign.title}</b>\n"
@@ -248,51 +336,15 @@ async def send_submission_to_expert(
         f"🆔 Работа: <code>{submission.id}</code>\n"
         f"🕒 Загружена: <code>{submission.created_at.strftime('%d.%m.%Y %H:%M')}</code>\n"
         f"⏳ Время на проверку: <b>{format_ttl_minutes(campaign.ttl_minutes)}</b>\n\n"
-        f"Оценивание: от <b>{campaign.min_score}</b> до <b>{campaign.max_score}</b>.\n"
-        "Дальше: введите оценку → напишите комментарий → подтвердите результат."
+        f"Оценивание: от <b>{campaign.min_score}</b> до <b>{campaign.max_score}</b>."
+        f"{criteria_block}\n\n"
+        "Дальше: оцените критерии (если есть) → введите итоговую оценку → "
+        "напишите комментарий → подтвердите результат."
     )
     await _send_submission_content(message, submission, caption)
 
-    reviewer_role = UserRole.EXPERT
-    async with session_scope() as session:
-        reviewer = await get_user(tg_id=message.from_user.id, session=session)
-        if reviewer:
-            reviewer_role = reviewer.role
+    await _start_scoring_flow(message, state, campaign, criteria)
 
-    await message.answer(
-        "⬇️ Введите оценку числом.\n"
-        f"Допустимый диапазон: {campaign.min_score}–{campaign.max_score}.",
-        reply_markup=get_keyboard_for_role(reviewer_role),
-    )
-    await message.answer(
-        "Выберите оценку кнопкой или введите вручную:",
-        reply_markup=build_quick_score_keyboard(),
-    )
-
-
-async def _preview_submission_for_take(
-    message: types.Message,
-    submission,
-    campaign,
-    author: User,
-) -> None:
-    """Show submission preview before expert confirms taking it."""
-    caption = (
-        f"📝 <b>Работа найдена</b>\n\n"
-        f"📋 Кампания: <b>{campaign.title}</b>\n"
-        f"👤 Студент: <b>{author.full_name}</b>\n"
-        f"📚 Группа: <b>{author.study_group or 'Не указана'}</b>\n"
-        f"🆔 Работа: <code>{submission.id}</code>\n"
-        f"🕒 Загружена: <code>{submission.created_at.strftime('%d.%m.%Y %H:%M')}</code>\n"
-        f"⏳ Время на проверку после взятия: <b>{format_ttl_minutes(campaign.ttl_minutes)}</b>\n\n"
-        f"Оценивание: от <b>{campaign.min_score}</b> до <b>{campaign.max_score}</b>.\n"
-        "Подтвердите, если хотите взять эту работу на проверку."
-    )
-    await _send_submission_content(message, submission, caption)
-    await message.answer(
-        "Нажмите кнопку ниже, чтобы взять работу, или отмените действие.",
-        reply_markup=build_take_submission_confirmation_keyboard(submission.id),
-    )
 
 async def _try_assign_submission_to_expert(
     message: types.Message,
@@ -352,8 +404,19 @@ async def _try_assign_submission_to_expert(
 
     logger.info(f"Expert {tg_id} took submission {submission.id} (TTL: {campaign.ttl_minutes}m)")
 
-    await send_submission_to_expert(message, submission, campaign, author)
-    await state.set_state(ExpertReviewState.waiting_for_score)
+    await state.update_data(
+        campaign_criteria=CampaignService.deserialize_criteria(campaign.criteria_text),
+        criteria_scores=[],
+        criteria_index=0,
+        score=None,
+        comment_text=None,
+        voice_file_id=None,
+        voice_transcription_text=None,
+        comment_mode=None,
+        criteria_prompt_message_id=None,
+    )
+
+    await send_submission_to_expert(message, submission, campaign, author, state)
     return True
 
 async def _deliver_current_submission(
@@ -385,9 +448,17 @@ async def _deliver_current_submission(
         submission_id=submission.id,
         campaign_id=submission.campaign_id,
         ttl_minutes=campaign.ttl_minutes,
+        campaign_criteria=CampaignService.deserialize_criteria(campaign.criteria_text),
+        criteria_scores=[],
+        criteria_index=0,
+        score=None,
+        comment_text=None,
+        voice_file_id=None,
+        voice_transcription_text=None,
+        comment_mode=None,
+        criteria_prompt_message_id=None,
     )
-    await send_submission_to_expert(message, submission, campaign, author)
-    await state.set_state(ExpertReviewState.waiting_for_score)
+    await send_submission_to_expert(message, submission, campaign, author, state)
     return True
 
 
@@ -438,7 +509,7 @@ async def cmd_take(
     state: FSMContext,
     expert_tg_id: int | None = None,
 ) -> None:
-    """Handle /take command - show next submission and ask for confirmation."""
+    """Handle /take command - immediately lock and open next submission."""
     tg_id = expert_tg_id or message.from_user.id
 
     if expert_tg_id is None:
@@ -470,49 +541,100 @@ async def cmd_take(
     async with session_scope() as session:
         submissions = await get_submission_pending(session, limit=10)
 
-        for submission in submissions:
-            campaign = await get_campaign(submission.campaign_id, session)
-            if not campaign:
-                continue
-
-            author = await get_user(tg_id=submission.author_id, session=session)
-            if not author:
-                continue
-
-            await state.update_data(
-                pending_take_submission_id=submission.id,
-                pending_take_campaign_id=submission.campaign_id,
-            )
-            await _preview_submission_for_take(message, submission, campaign, author)
+    for submission in submissions:
+        if await _try_assign_submission_to_expert(
+            message,
+            state,
+            submission.id,
+            expert_tg_id=tg_id,
+        ):
             return
 
-        await message.answer(
-            "📭 <b>Очередь пуста</b>\n\n"
-            "Нет доступных работ для проверки.",
-            parse_mode="HTML",
-        )
+    await message.answer(
+        "📭 <b>Очередь пуста</b>\n\n"
+        "Нет доступных работ для проверки.",
+        parse_mode="HTML",
+    )
 
 
 @router.message(Command("return"))
 async def cmd_return(message: types.Message, state: FSMContext) -> None:
-    """Handle /return command - return submission back to queue."""
+    """Handle /return command - ask confirmation before returning submission back to queue."""
     if not await check_expert_role(message):
         return
 
-    tg_id = message.from_user.id
     data = await state.get_data()
     submission_id = data.get("submission_id")
 
     if not submission_id:
-        await message.answer("⚠️ У вас нет работы на проверке.")
+        await message.answer(
+            "⚠️ <b>Сейчас у вас нет работы на проверке.</b>\n\n"
+            "Чтобы взять новую работу, используйте /take или кнопку «Взять работу».",
+            parse_mode="HTML",
+        )
+        return
+
+    await message.answer(
+        "↩️ <b>Вернуть работу в очередь?</b>\n\n"
+        f"Работа <code>{submission_id}</code> снова станет доступна другим проверяющим.\n"
+        "Ваши текущие оценка и комментарий в этом черновике не сохранятся.",
+        parse_mode="HTML",
+        reply_markup=types.InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    types.InlineKeyboardButton(
+                        text="↩️ Да, вернуть в очередь",
+                        callback_data="confirm_return_review",
+                    )
+                ],
+                [
+                    types.InlineKeyboardButton(
+                        text="Продолжить проверку",
+                        callback_data="keep_review",
+                    )
+                ],
+            ]
+        ),
+    )
+
+@router.callback_query(F.data == "keep_review")
+async def handle_keep_review(callback: types.CallbackQuery) -> None:
+    """Keep current submission in review after return confirmation prompt."""
+    await callback.answer("Проверка продолжена")
+    if not callback.message:
+        return
+    await callback.message.answer(
+        "📝 Продолжайте проверку текущей работы. Когда закончите, подтвердите отправку рецензии.",
+        parse_mode="HTML",
+    )
+
+@router.callback_query(F.data == "confirm_return_review")
+async def handle_confirm_return_review(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+) -> None:
+    """Return current submission back to queue after explicit confirmation."""
+    if not callback.message:
+        await callback.answer("Ошибка: не удалось обработать запрос", show_alert=True)
+        return
+
+    tg_id = callback.from_user.id
+    data = await state.get_data()
+    submission_id = data.get("submission_id")
+
+    if not submission_id:
+        await callback.answer("Работа для возврата не найдена", show_alert=True)
+        await callback.message.answer(
+            "⚠️ <b>Сейчас у вас нет работы на проверке.</b>\n\n"
+            "Используйте /take, чтобы взять новую работу.",
+            parse_mode="HTML",
+        )
         return
 
     logger.info(f"Expert {tg_id} returning submission {submission_id}")
 
-    # Unlock from Redis
     await queue_service.unlock_submission(submission_id)
 
-    # Update DB status
     async with session_scope() as session:
         await update_submission_status(
             submission_id,
@@ -526,8 +648,11 @@ async def cmd_return(message: types.Message, state: FSMContext) -> None:
         user = await get_user(tg_id=tg_id, session=session)
         reply_markup = get_keyboard_for_role(user.role) if user else None
 
-    await message.answer(
-        f"✅ Работа (ID: <code>{submission_id}</code>) возвращена в очередь.",
+    await callback.answer("Работа возвращена в очередь")
+    await callback.message.answer(
+        f"↩️ <b>Работа возвращена в очередь.</b>\n\n"
+        f"ID работы: <code>{submission_id}</code>\n"
+        "Если хотите продолжить проверку, возьмите другую работу через /take.",
         parse_mode="HTML",
         reply_markup=reply_markup,
     )
@@ -565,63 +690,6 @@ async def expert_take_next(callback: types.CallbackQuery, state: FSMContext) -> 
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("expert_confirm_take:"))
-async def expert_confirm_take(callback: types.CallbackQuery, state: FSMContext) -> None:
-    if not callback.message:
-        await callback.answer("Ошибка: не удалось получить сообщение", show_alert=True)
-        return
-    if not await _check_expert_access(
-        callback.from_user.id,
-        answer_callback=callback,
-    ):
-        return
-
-    submission_id_text = callback.data.removeprefix("expert_confirm_take:")
-    if not submission_id_text.isdigit():
-        await callback.answer("Некорректный идентификатор работы", show_alert=True)
-        return
-
-    submission_id = int(submission_id_text)
-    data = await state.get_data()
-    pending_take_submission_id = data.get("pending_take_submission_id")
-
-    if pending_take_submission_id != submission_id:
-        await callback.answer("Предпросмотр устарел. Запросите работу заново через /take.", show_alert=True)
-        return
-
-    await state.update_data(
-        pending_take_submission_id=None,
-        pending_take_campaign_id=None,
-    )
-    await callback.answer("Берём работу на проверку...")
-    await _try_assign_submission_to_expert(
-        callback.message,
-        state,
-        submission_id,
-        expert_tg_id=callback.from_user.id,
-    )
-
-@router.callback_query(F.data == "expert_cancel_take")
-async def expert_cancel_take(callback: types.CallbackQuery, state: FSMContext) -> None:
-    if not callback.message:
-        await callback.answer("Ошибка: не удалось получить сообщение", show_alert=True)
-        return
-    if not await _check_expert_access(
-        callback.from_user.id,
-        answer_callback=callback,
-    ):
-        return
-
-    await state.update_data(
-        pending_take_submission_id=None,
-        pending_take_campaign_id=None,
-    )
-    await callback.message.answer(
-        "❌ Взятие работы отменено. Работа осталась в очереди.",
-        parse_mode="HTML",
-    )
-    await callback.answer("Отменено")
-
 @router.callback_query(F.data == "expert_show_stats")
 async def expert_show_stats(callback: types.CallbackQuery) -> None:
     if not callback.message:
@@ -646,9 +714,14 @@ async def btn_more(message: types.Message) -> None:
 
 
 # Callback query handlers
-@router.message(StateFilter(ExpertReviewState.waiting_for_score))
+@router.message(
+    StateFilter(
+        ExpertReviewState.waiting_for_criteria_score,
+        ExpertReviewState.waiting_for_score,
+    )
+)
 async def process_score_input(message: types.Message, state: FSMContext) -> None:
-    """Process score input from expert."""
+    """Process score input for criterion or final score depending on FSM state."""
     data = await state.get_data()
     submission_id = data.get("submission_id")
     campaign_id = data.get("campaign_id")
@@ -663,6 +736,8 @@ async def process_score_input(message: types.Message, state: FSMContext) -> None
         await message.answer("❌ Введите оценку числом.")
         return
 
+    current_state = await state.get_state()
+
     async with session_scope() as session:
         campaign = await get_campaign(campaign_id, session)
         if not campaign:
@@ -674,6 +749,39 @@ async def process_score_input(message: types.Message, state: FSMContext) -> None
                 f"❌ Оценка должна быть в диапазоне {campaign.min_score}–{campaign.max_score}."
             )
             return
+
+    if current_state == ExpertReviewState.waiting_for_criteria_score.state:
+        criteria: list[str] = data.get("campaign_criteria") or []
+        criteria_scores: list[dict[str, int | str]] = data.get("criteria_scores") or []
+        criteria_index = int(data.get("criteria_index") or 0)
+
+        if criteria_index >= len(criteria):
+            await state.set_state(ExpertReviewState.waiting_for_score)
+            await _prompt_for_total_score(message, campaign)
+            return
+
+        criterion_name = criteria[criteria_index]
+        criteria_scores.append({"name": criterion_name, "score": score})
+        next_index = criteria_index + 1
+
+        await state.update_data(
+            criteria_scores=criteria_scores,
+            criteria_index=next_index,
+        )
+
+        if next_index < len(criteria):
+            await _show_or_update_criteria_prompt(message, state, campaign, criteria, next_index)
+            return
+
+        await state.update_data(criteria_prompt_message_id=None)
+        await state.set_state(ExpertReviewState.waiting_for_score)
+        await message.answer(
+            "✅ <b>Все оценки по критериям сохранены.</b>\n"
+            "Ниже введите итоговую оценку по работе.",
+            parse_mode="HTML",
+        )
+        await _prompt_for_total_score(message, campaign)
+        return
 
     await state.update_data(score=score)
     await state.set_state(ExpertReviewState.waiting_for_comment)
@@ -691,7 +799,7 @@ async def process_score_input(message: types.Message, state: FSMContext) -> None
 
 @router.callback_query(F.data.startswith("score_quick_"))
 async def process_quick_score(callback: types.CallbackQuery, state: FSMContext) -> None:
-    """Process quick score selection from inline buttons."""
+    """Process quick score selection for criterion or final score."""
     if not callback.message or not isinstance(callback.message, types.Message):
         return
 
@@ -709,6 +817,8 @@ async def process_quick_score(callback: types.CallbackQuery, state: FSMContext) 
         return
 
     score = int(score_value)
+    current_state = await state.get_state()
+
     async with session_scope() as session:
         campaign = await get_campaign(campaign_id, session)
         if not campaign:
@@ -720,6 +830,41 @@ async def process_quick_score(callback: types.CallbackQuery, state: FSMContext) 
                 show_alert=True,
             )
             return
+
+    if current_state == ExpertReviewState.waiting_for_criteria_score.state:
+        criteria: list[str] = data.get("campaign_criteria") or []
+        criteria_scores: list[dict[str, int | str]] = data.get("criteria_scores") or []
+        criteria_index = int(data.get("criteria_index") or 0)
+
+        if criteria_index >= len(criteria):
+            await state.set_state(ExpertReviewState.waiting_for_score)
+            await callback.answer()
+            await _prompt_for_total_score(callback.message, campaign)
+            return
+
+        criterion_name = criteria[criteria_index]
+        criteria_scores.append({"name": criterion_name, "score": score})
+        next_index = criteria_index + 1
+
+        await state.update_data(
+            criteria_scores=criteria_scores,
+            criteria_index=next_index,
+        )
+        await callback.answer(f"{criterion_name}: {score}")
+
+        if next_index < len(criteria):
+            await _show_or_update_criteria_prompt(callback.message, state, campaign, criteria, next_index)
+            return
+
+        await state.update_data(criteria_prompt_message_id=None)
+        await state.set_state(ExpertReviewState.waiting_for_score)
+        await callback.message.answer(
+            "✅ <b>Все оценки по критериям сохранены.</b>\n"
+            "Ниже введите итоговую оценку по работе.",
+            parse_mode="HTML",
+        )
+        await _prompt_for_total_score(callback.message, campaign)
+        return
 
     await state.update_data(score=score)
     await state.set_state(ExpertReviewState.waiting_for_comment)
@@ -750,6 +895,7 @@ async def handle_confirm_callback(callback: types.CallbackQuery, state: FSMConte
     comment_text = data.get("comment_text")
     voice_file_id = data.get("voice_file_id")
     comment_mode = data.get("comment_mode")
+    criteria_scores = data.get("criteria_scores")
 
     if not submission_id or score is None:
         await callback.answer("Сначала выберите оценку", show_alert=True)
@@ -768,43 +914,53 @@ async def handle_confirm_callback(callback: types.CallbackQuery, state: FSMConte
         f"score={score}, comment_mode={comment_mode}"
     )
 
-    # Unlock from Redis
-    await queue_service.unlock_submission(submission_id)
+    try:
+        async with session_scope() as session:
+            await create_review(
+                submission_id=submission_id,
+                reviewer_id=tg_id,
+                score=score,
+                comment_text=comment_text,
+                voice_file_id=voice_file_id,
+                criteria_scores=criteria_scores,
+                session=session,
+            )
+            await update_submission_status(submission_id, SubmissionStatus.REVIEWED, session)
 
-    # Save to DB and collect data for notifications
-    async with session_scope() as session:
-        await create_review(
-            submission_id=submission_id,
-            reviewer_id=tg_id,
-            score=score,
-            comment_text=comment_text,
-            voice_file_id=voice_file_id,
-            session=session,
+            submission = await get_submission(submission_id, session)
+            campaign = await get_campaign(submission.campaign_id, session)
+            author = await get_user(tg_id=submission.author_id, session=session)
+            reviewer = await get_user(tg_id=tg_id, session=session)
+
+            if author and not author.is_banned:
+                notification_service = _get_notification_service(bot)
+                try:
+                    await notification_service.notify_student_reviewed(
+                        student_tg_id=author.tg_id,
+                        campaign_title=campaign.title if campaign else "",
+                        score=score,
+                        comment=comment_text,
+                        reviewer_name=reviewer.full_name if reviewer else None,
+                        is_expert_anon=campaign.is_expert_anon if campaign else True,
+                        voice_file_id=voice_file_id,
+                        criteria_scores=criteria_scores,
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to notify student: {e}")
+    except Exception as e:
+        logger.exception(f"Failed to save expert review for submission {submission_id}: {e}")
+        await callback.answer("Ошибка сохранения", show_alert=True)
+        await message.answer(
+            "❌ <b>Не удалось сохранить рецензию.</b>\n\n"
+            "Ваши оценка и комментарий не потеряны — можно попробовать ещё раз кнопкой "
+            "«Подтвердить».\n"
+            "Если ошибка повторится, верните работу в очередь или обратитесь к организатору.",
+            parse_mode="HTML",
+            reply_markup=build_review_confirmation_keyboard(),
         )
-        await update_submission_status(submission_id, SubmissionStatus.REVIEWED, session)
+        return
 
-        # Get submission with author info for notifications
-        submission = await get_submission(submission_id, session)
-        campaign = await get_campaign(submission.campaign_id, session)
-        author = await get_user(tg_id=submission.author_id, session=session)
-        reviewer = await get_user(tg_id=tg_id, session=session)
-
-        # Notify student about review
-        if author and not author.is_banned:
-            notification_service = _get_notification_service(bot)
-            try:
-                await notification_service.notify_student_reviewed(
-                    student_tg_id=author.tg_id,
-                    campaign_title=campaign.title if campaign else "",
-                    score=score,
-                    comment=comment_text,
-                    reviewer_name=reviewer.full_name if reviewer else None,
-                    is_expert_anon=campaign.is_expert_anon if campaign else True,
-                    voice_file_id=voice_file_id,
-                )
-            except Exception as e:
-                logger.error(f"Failed to notify student: {e}")
-
+    await queue_service.unlock_submission(submission_id)
     await state.clear()
 
     async with session_scope() as session:
@@ -815,11 +971,13 @@ async def handle_confirm_callback(callback: types.CallbackQuery, state: FSMConte
 
     await callback.answer("Рецензия сохранена!")
     await message.answer(
-        f"✅ <b>Рецензия сохранена!</b>\n\n"
-        f"🆔 Работа: <code>{submission_id}</code>\n"
-        f"⭐ Оценка: <b>{score}</b>\n"
-        f"💬 Комментарий: <b>{comment_summary}</b>\n\n"
-        "Можно сразу взять следующую работу или открыть статистику.",
+        format_review_saved_summary(
+            submission_id=submission_id,
+            score=score,
+            comment_summary=comment_summary,
+            criteria_scores=criteria_scores,
+            extra_text="Можно сразу взять следующую работу или открыть статистику.",
+        ),
         parse_mode="HTML",
         reply_markup=build_post_review_keyboard(),
     )
@@ -950,7 +1108,12 @@ async def handle_voice_comment_transcribe(
         return
 
     await callback.answer()
-    await callback.message.answer("🧠 Распознаю голосовое сообщение, подождите...")
+    await callback.message.answer(
+        "🧠 <b>Распознаю голосовое сообщение</b>\n\n"
+        "Обычно это занимает до 30 секунд.\n"
+        "Если запись длинная, подождите немного дольше — я пришлю текст сразу после готовности.",
+        parse_mode="HTML",
+    )
 
     service = VoiceTranscriptionService(bot)
     try:
@@ -1068,6 +1231,14 @@ async def handle_score_proceed_ban(callback: types.CallbackQuery, state: FSMCont
     )
 
 
+@router.callback_query(F.data == "skip_criteria")
+async def handle_skip_criteria(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Keep backward compatibility with old inline buttons."""
+    await callback.answer(
+        "Пропуск критериев отключён. Нужно оценить каждый критерий.",
+        show_alert=True,
+    )
+
 @router.callback_query(F.data == "comment_skip")
 async def handle_comment_skip(callback: types.CallbackQuery, state: FSMContext) -> None:
     await state.update_data(
@@ -1164,6 +1335,7 @@ async def process_ban_reason(message: types.Message, state: FSMContext, bot: Bot
             score=score,
             comment_text=comment_text,
             ban_comment=ban_reason,
+            criteria_scores=data.get("criteria_scores"),
             session=session,
         )
         await update_submission_status(submission_id, SubmissionStatus.REVIEWED, session)

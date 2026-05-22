@@ -16,6 +16,7 @@ class CampaignCreationStates(StatesGroup):
     waiting_for_submission_format = State()
     waiting_for_allow_resubmission_before_review = State()
     waiting_for_allow_resubmission_after_review = State()
+    waiting_for_criteria = State()
 
 
 class SubmissionStates(StatesGroup):
@@ -28,6 +29,4 @@ class SubmissionStates(StatesGroup):
 class OrganizerSessionState(StatesGroup):
     """FSM states for organizer session management workflow."""
     creating_session = State()
-    setting_criteria = State()
     awaiting_session_name = State()
-    awaiting_criteria = State()

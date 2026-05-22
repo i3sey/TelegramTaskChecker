@@ -150,6 +150,7 @@ class Campaign(Base):
         nullable=False,
     )
     allowed_extensions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    criteria_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     allow_resubmission_after_review: Mapped[bool] = mapped_column(
         Boolean,
         default=False,
@@ -263,6 +264,7 @@ class Review(Base):
         nullable=False,
     )
     score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    criteria_scores: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     comment_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     voice_file_id: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     ban_comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

@@ -142,9 +142,12 @@ async def cmd_start(message: types.Message, state: FSMContext):
             # Don't show invite warning if we just validated an invite
             if not invite_ok and not _has_invite_access(existing_user):
                 extra_notice = (
-                    "\n\n❗ Для доступа к роли нужен инвайт. "
-                    "Откройте ссылку приглашения или отправьте /start "
-                    "<code>&lt;код&gt;</code>."
+                    "\n\n🔐 <b>Для полного доступа нужен код приглашения.</b>\n"
+                    "Что делать:\n"
+                    "• попросите код или ссылку приглашения у преподавателя / организатора;\n"
+                    "• откройте ссылку-приглашение, если вам её прислали;\n"
+                    "• либо отправьте команду <code>/start ВАШ_КОД</code>.\n\n"
+                    "Без кода вы сможете войти в бота, но некоторые действия для выбранной роли будут недоступны."
                 )
 
             await message.answer(
@@ -178,7 +181,11 @@ async def cmd_start(message: types.Message, state: FSMContext):
                 await state.set_state(RegistrationStates.waiting_for_full_name)
             else:
                 await message.answer(
-                    registration_welcome_text(),
+                    registration_welcome_text()
+                    + "\n\n"
+                    + "🔐 <b>Для роли студента или эксперта может понадобиться код приглашения.</b>\n"
+                    + "Если у вас его пока нет, попросите код или ссылку у преподавателя / организатора.\n"
+                    + "Код можно будет отправить позже командой <code>/start ВАШ_КОД</code>.",
                     reply_markup=_build_role_keyboard(),
                     parse_mode="HTML",
                 )

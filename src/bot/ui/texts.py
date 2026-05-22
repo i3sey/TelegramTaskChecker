@@ -108,7 +108,6 @@ def help_text_for_role(role: UserRole | None) -> str:
             "/create_campaign — создать кампанию\n"
             "/my_campaigns — посмотреть свои кампании\n"
             "/invites — узнать про инвайты\n"
-            "/set_criteria — задать критерии\n"
             "/view_results — результаты\n"
             "/export — экспорт\n"
             "/analytics — аналитика\n\n"

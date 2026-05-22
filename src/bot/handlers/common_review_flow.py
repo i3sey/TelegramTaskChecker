@@ -110,20 +110,48 @@ def format_comment_saved_text(
         f"{next_step_text}"
     )
 
+def format_criteria_scores_block(
+    criteria_scores: list[dict[str, int | str]] | None,
+) -> str:
+    """Format ordered per-criterion scores block for review summaries."""
+    lines: list[str] = []
+
+    for item in criteria_scores or []:
+        if not isinstance(item, dict):
+            continue
+        criterion_name = str(item.get("name") or "").strip()
+        criterion_score = item.get("score")
+
+        if not criterion_name or criterion_score in (None, ""):
+            continue
+
+        lines.append(f"• {criterion_name} — {criterion_score}")
+
+    if not lines:
+        return ""
+
+    return "📋 <b>Критерии:</b>\n" + "\n".join(lines)
+
 def format_review_saved_summary(
     *,
     submission_id: int,
     score: int,
     comment_summary: str,
+    criteria_scores: list[dict[str, int | str]] | None = None,
     extra_text: str | None = None,
 ) -> str:
     """Format a generic successful review summary."""
-    text = (
-        "✅ <b>Рецензия сохранена!</b>\n\n"
-        f"🆔 Работа: <code>{submission_id}</code>\n"
-        f"⭐ Оценка: <b>{score}</b>\n"
+    text = "✅ <b>Рецензия сохранена!</b>\n\n" f"🆔 Работа: <code>{submission_id}</code>\n"
+
+    criteria_block = format_criteria_scores_block(criteria_scores)
+    if criteria_block:
+        text += f"{criteria_block}\n"
+
+    text += (
+        f"⭐ Итоговая оценка: <b>{score}</b>\n"
         f"💬 Комментарий: <b>{comment_summary}</b>"
     )
+
     if extra_text:
         text += f"\n\n{extra_text}"
     return text
