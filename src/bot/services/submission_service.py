@@ -1,8 +1,8 @@
 """Submission service for database operations."""
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.bot.models import Campaign, Submission, SubmissionFormat, SubmissionStatus
+from src.bot.models import Campaign, Review, Submission, SubmissionFormat, SubmissionStatus
 from src.bot.utils.logging import logger
 
 class SubmissionService:
@@ -118,6 +118,46 @@ class SubmissionService:
             .order_by(Submission.created_at.desc())
         )
         return list(result.scalars().all())
+
+    @staticmethod
+    async def get_user_submissions_with_review_details(
+        user_id: int,
+        session: AsyncSession
+    ) -> list[tuple[Submission, str, Review | None]]:
+        """
+        Get all submissions by a specific user with campaign titles and latest review.
+
+        Args:
+            user_id: User's Telegram ID
+            session: Database session
+
+        Returns:
+            List of tuples: (Submission, campaign title, latest Review or None)
+        """
+        latest_review_subquery = (
+            select(
+                Review.submission_id.label("submission_id"),
+                func.max(Review.id).label("latest_review_id"),
+            )
+            .group_by(Review.submission_id)
+            .subquery()
+        )
+
+        result = await session.execute(
+            select(Submission, Campaign.title, Review)
+            .join(Campaign, Campaign.id == Submission.campaign_id)
+            .outerjoin(
+                latest_review_subquery,
+                latest_review_subquery.c.submission_id == Submission.id,
+            )
+            .outerjoin(Review, Review.id == latest_review_subquery.c.latest_review_id)
+            .where(Submission.author_id == user_id)
+            .order_by(Submission.created_at.desc(), Submission.id.desc())
+        )
+        return [
+            (submission, campaign_title, review)
+            for submission, campaign_title, review in result.all()
+        ]
 
     @staticmethod
     async def get_submission(
@@ -346,6 +386,13 @@ async def replace_submission_content(
 async def get_user_submissions(user_id: int, session: AsyncSession) -> list[Submission]:
     """Get all submissions by a user."""
     return await SubmissionService.get_user_submissions(user_id, session)
+
+async def get_user_submissions_with_review_details(
+    user_id: int,
+    session: AsyncSession
+) -> list[tuple[Submission, str, Review | None]]:
+    """Get all submissions by a user with campaign title and latest review."""
+    return await SubmissionService.get_user_submissions_with_review_details(user_id, session)
 
 async def get_submission(submission_id: int, session: AsyncSession) -> Submission | None:
     """Get submission by ID."""

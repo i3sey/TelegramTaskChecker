@@ -1977,10 +1977,11 @@ async def cmd_my_submissions(message: types.Message):
     logger.info(f"User {tg_id} triggered /my_submissions")
 
     async with session_scope() as session:
-        from src.bot.services.submission_service import get_user_submissions
-        from src.bot.services.campaign_service import get_campaign
+        from src.bot.services.submission_service import (
+            get_user_submissions_with_review_details,
+        )
 
-        submissions = await get_user_submissions(tg_id, session)
+        submissions = await get_user_submissions_with_review_details(tg_id, session)
 
         if not submissions:
             await message.answer(
@@ -1991,21 +1992,26 @@ async def cmd_my_submissions(message: types.Message):
             return
 
         text = "📎 <b>Ваши работы:</b>\n\n"
-        for i, submission in enumerate(submissions, 1):
-            campaign = await get_campaign(submission.campaign_id, session)
-            campaign_title = campaign.title if campaign else f"Кампания #{submission.campaign_id}"
-
-            status_emoji = {
-                "uploaded": "🟡",
-                "in_review": "🔵",
-                "reviewed": "✅",
-                "rejected": "❌",
-            }.get(submission.status.value, "⚪")
-
-            text += f"{i}. <b>{campaign_title}</b>\n"
+        for i, (submission, campaign_title, review) in enumerate(submissions, 1):
             _, status_label, _ = submission_status_meta(submission.status)
-            text += f"   📊 Статус: {status_emoji} {status_label}\n"
-            text += f"   📝 ID: <code>{submission.id}</code>\n"
-            text += f"   📅 Дата: {submission.created_at.strftime('%d.%m.%Y %H:%M')}\n\n"
+
+            if review is None:
+                review_result = "⏳ Проверка ещё не завершена"
+            else:
+                score_text = (
+                    f"{review.score}"
+                    if review.score is not None
+                    else "без оценки"
+                )
+                comment_text = (
+                    escape(review.comment_text)
+                    if review.comment_text
+                    else "без комментария"
+                )
+                review_result = f"🧾 Результат: {score_text}\n   💬 Комментарий: {comment_text}"
+
+            text += f"{i}. <b>{escape(campaign_title)}</b>\n"
+            text += f"   📊 Статус: {status_label}\n"
+            text += f"   {review_result}\n\n"
 
         await message.answer(text, parse_mode="HTML")
