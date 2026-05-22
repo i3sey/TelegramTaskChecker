@@ -1,0 +1,2932 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TelegramTaskChecker — Organizer Interface</title>
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --error: #ef4444;
+      --bg: #f3f4f6;
+      --card: #ffffff;
+      --text: #0f172a;
+      --muted: #64748b;
+      --line: #e2e8f0;
+      --soft-blue: #eff6ff;
+      --soft-green: #ecfdf5;
+      --soft-orange: #fffbeb;
+      --soft-red: #fef2f2;
+      --soft-slate: #f8fafc;
+      --soft-violet: #f5f3ff;
+      --black: #020617;
+      --radius-sm: 12px;
+      --radius-md: 16px;
+      --radius-lg: 24px;
+      --radius-xl: 32px;
+      --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.05), 0 10px 28px rgba(15, 23, 42, 0.04);
+      --shadow-float: 0 18px 60px rgba(15, 23, 42, 0.18);
+      --font: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: #dde3ea;
+      color: var(--text);
+      font-family: var(--font);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+    }
+
+    .app-shell {
+      width: min(1440px, calc(100vw - 32px));
+      min-height: calc(100vh - 32px);
+      margin: 16px auto;
+      border-radius: 28px;
+      overflow: hidden;
+      box-shadow: var(--shadow-float);
+      background: var(--bg);
+    }
+
+    .app-layout {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      min-height: calc(100vh - 32px);
+    }
+
+    .sidebar {
+      background: rgba(255, 255, 255, 0.94);
+      border-right: 1px solid var(--line);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      backdrop-filter: blur(14px);
+    }
+
+    .brand {
+      min-height: 78px;
+      background: var(--black);
+      border-radius: 24px;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 16px;
+    }
+
+    .brand-icon {
+      width: 46px;
+      height: 46px;
+      background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+      border-radius: 16px;
+      display: grid;
+      place-items: center;
+      font-size: 20px;
+      font-weight: 800;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.18);
+    }
+
+    .brand-title {
+      font-size: 16px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+
+    .brand-subtitle {
+      margin-top: 4px;
+      font-size: 12px;
+      color: #94a3b8;
+    }
+
+    .nav {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .nav-item {
+      height: 50px;
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 16px;
+      color: #475569;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: 0.2s ease;
+      user-select: none;
+    }
+
+    .nav-item:hover {
+      background: #eef2ff;
+      color: var(--primary);
+    }
+
+    .nav-item.active {
+      background: var(--primary);
+      color: #fff;
+      box-shadow: 0 10px 22px rgba(37, 99, 235, 0.22);
+    }
+
+    .nav-ico {
+      width: 22px;
+      height: 22px;
+      display: grid;
+      place-items: center;
+      opacity: 0.95;
+      font-size: 15px;
+    }
+
+    .sidebar-widget {
+      margin-top: auto;
+      background: var(--soft-slate);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      padding: 18px;
+    }
+
+    .widget-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .widget-value {
+      margin-top: 14px;
+      font-size: 30px;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+    }
+
+    .widget-note {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .widget-line {
+      margin-top: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .main {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .topbar {
+      min-height: 178px;
+      padding: 32px 40px 24px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(243, 244, 246, 0.84);
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 24px;
+    }
+
+    .eyebrow {
+      color: var(--primary);
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    h1 {
+      margin: 6px 0 0;
+      font-size: 40px;
+      letter-spacing: -0.045em;
+      line-height: 1.06;
+    }
+
+    .page-description {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.5;
+      max-width: 720px;
+    }
+
+    .top-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding-top: 48px;
+      justify-content: flex-end;
+    }
+
+    .content {
+      padding: 32px 40px 40px;
+    }
+
+    .page {
+      display: none;
+    }
+
+    .page.active {
+      display: block;
+    }
+
+    .grid-4,
+    .grid-3,
+    .grid-2-main,
+    .grid-form-main {
+      display: grid;
+      gap: 18px;
+    }
+
+    .grid-4 {
+      grid-template-columns: repeat(4, 1fr);
+    }
+
+    .grid-3 {
+      grid-template-columns: repeat(3, 1fr);
+    }
+
+    .grid-2-main {
+      grid-template-columns: minmax(0, 1fr) 360px;
+      gap: 22px;
+    }
+
+    .grid-form-main {
+      grid-template-columns: 440px minmax(0, 1fr);
+      gap: 22px;
+    }
+
+    .stack-22 {
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+
+    .card,
+    .section-card {
+      background: var(--card);
+      border: 1px solid rgba(226, 232, 240, 0.9);
+      box-shadow: var(--shadow-card);
+    }
+
+    .card {
+      border-radius: 28px;
+    }
+
+    .card.pad,
+    .section-card {
+      padding: 24px;
+    }
+
+    .section-card {
+      border-radius: 32px;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 22px;
+    }
+
+    .section-title {
+      margin: 0;
+      font-size: 22px;
+      letter-spacing: -0.03em;
+      font-weight: 800;
+    }
+
+    .section-note {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .stat-card {
+      padding: 22px;
+      border-radius: 28px;
+    }
+
+    .stat-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 14px;
+    }
+
+    .stat-title {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .stat-value {
+      margin-top: 13px;
+      font-size: 34px;
+      font-weight: 800;
+      letter-spacing: -0.045em;
+    }
+
+    .stat-hint {
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .icon-box {
+      width: 48px;
+      height: 48px;
+      border-radius: 18px;
+      display: grid;
+      place-items: center;
+      font-size: 20px;
+      font-weight: 800;
+      flex: 0 0 auto;
+    }
+
+    .icon-blue {
+      background: var(--soft-blue);
+      color: var(--primary);
+      border: 1px solid #dbeafe;
+    }
+
+    .icon-green {
+      background: var(--soft-green);
+      color: #059669;
+      border: 1px solid #d1fae5;
+    }
+
+    .icon-orange {
+      background: var(--soft-orange);
+      color: #d97706;
+      border: 1px solid #fef3c7;
+    }
+
+    .icon-red {
+      background: var(--soft-red);
+      color: #dc2626;
+      border: 1px solid #fee2e2;
+    }
+
+    .icon-violet {
+      background: var(--soft-violet);
+      color: #7c3aed;
+      border: 1px solid #ddd6fe;
+    }
+
+    .button {
+      height: 42px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      border-radius: 16px;
+      padding: 0 18px;
+      border: 0;
+      font-family: var(--font);
+      font-weight: 800;
+      font-size: 14px;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: 0.2s ease;
+    }
+
+    .button:hover {
+      transform: translateY(-1px);
+    }
+
+    .button.primary {
+      background: var(--primary);
+      color: #fff;
+      box-shadow: 0 10px 22px rgba(37, 99, 235, 0.22);
+    }
+
+    .button.primary:hover {
+      background: var(--primary-dark);
+    }
+
+    .button.secondary {
+      background: #fff;
+      color: #334155;
+      border: 1px solid var(--line);
+    }
+
+    .button.secondary:hover {
+      border-color: #cbd5e1;
+      background: #f8fafc;
+    }
+
+    .button.success {
+      background: var(--soft-green);
+      color: #059669;
+      border: 1px solid #d1fae5;
+    }
+
+    .button.danger {
+      background: var(--soft-red);
+      color: #dc2626;
+      border: 1px solid #fee2e2;
+    }
+
+    .button.full {
+      width: 100%;
+    }
+
+    .button.ghost {
+      background: rgba(255,255,255,.08);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,.1);
+    }
+
+    .campaign-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .campaign-card {
+      padding: 20px;
+      border-radius: 28px;
+    }
+
+    .campaign-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+    }
+
+    .campaign-title {
+      margin: 16px 0 0;
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: -0.025em;
+      line-height: 1.25;
+    }
+
+    .campaign-note {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .mini-metrics {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 22px;
+    }
+
+    .mini-metric {
+      background: var(--soft-slate);
+      border-radius: 18px;
+      padding: 14px;
+    }
+
+    .mini-label {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .mini-value {
+      margin-top: 5px;
+      font-size: 22px;
+      font-weight: 800;
+    }
+
+    .progress-row {
+      display: flex;
+      justify-content: space-between;
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 20px;
+      margin-bottom: 8px;
+    }
+
+    .progress-track {
+      height: 8px;
+      background: #e5e7eb;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: var(--primary);
+    }
+
+    .progress-fill.green {
+      background: var(--success);
+    }
+
+    .progress-fill.orange {
+      background: var(--warning);
+    }
+
+    .progress-fill.red {
+      background: var(--error);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 28px;
+      padding: 4px 11px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      border: 1px solid transparent;
+      white-space: nowrap;
+      line-height: 1.2;
+    }
+
+    .badge.blue {
+      background: var(--soft-blue);
+      color: var(--primary);
+      border-color: #dbeafe;
+    }
+
+    .badge.green {
+      background: var(--soft-green);
+      color: #059669;
+      border-color: #d1fae5;
+    }
+
+    .badge.orange {
+      background: var(--soft-orange);
+      color: #d97706;
+      border-color: #fef3c7;
+    }
+
+    .badge.red {
+      background: var(--soft-red);
+      color: #dc2626;
+      border-color: #fee2e2;
+    }
+
+    .badge.slate {
+      background: #f1f5f9;
+      color: #475569;
+      border-color: #e2e8f0;
+    }
+
+    .badge.violet {
+      background: var(--soft-violet);
+      color: #7c3aed;
+      border-color: #ddd6fe;
+    }
+
+    .quick-card {
+      background: var(--black);
+      color: #fff;
+      border-radius: 32px;
+      padding: 24px;
+    }
+
+    .quick-head {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+    }
+
+    .quick-title {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+
+    .quick-sub {
+      margin-top: 4px;
+      color: #94a3b8;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .quick-list {
+      margin-top: 26px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .quick-action {
+      min-height: 58px;
+      border-radius: 18px;
+      padding: 0 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 14px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: 0.2s ease;
+    }
+
+    .quick-action:hover {
+      transform: translateY(-1px);
+    }
+
+    .quick-action.white {
+      background: #fff;
+      color: var(--text);
+    }
+
+    .quick-action.dark {
+      background: rgba(255, 255, 255, 0.08);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .bot-status {
+      margin-top: 24px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 24px;
+      padding: 16px;
+    }
+
+    .status-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      font-size: 13px;
+      color: #cbd5e1;
+    }
+
+    label {
+      display: block;
+    }
+
+    .label {
+      display: block;
+      margin-bottom: 8px;
+      color: #475569;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .input,
+    .select,
+    .textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 16px;
+      min-height: 46px;
+      padding: 0 16px;
+      font-family: var(--font);
+      font-size: 14px;
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .input:focus,
+    .select:focus,
+    .textarea:focus {
+      border-color: #93c5fd;
+      box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.08);
+    }
+
+    .textarea {
+      min-height: 112px;
+      padding: 14px 16px;
+      resize: vertical;
+    }
+
+    .field-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .field-grid-2,
+    .field-grid-3 {
+      display: grid;
+      gap: 14px;
+    }
+
+    .field-grid-2 {
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .field-grid-3 {
+      grid-template-columns: repeat(3, 1fr);
+    }
+
+    .helper-text {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .checkbox-row {
+      min-height: 52px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      background: var(--soft-slate);
+      border-radius: 18px;
+      padding: 14px 16px;
+      color: #475569;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .checkbox-row input {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--primary);
+      flex: 0 0 auto;
+    }
+
+    .search {
+      position: relative;
+      width: 340px;
+      max-width: 100%;
+    }
+
+    .search .input {
+      padding-left: 42px;
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 16px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #94a3b8;
+      pointer-events: none;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 18px;
+    }
+
+    .toolbar-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .table-wrap {
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      overflow: auto;
+      background: #fff;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+      min-width: 760px;
+    }
+
+    th {
+      background: var(--soft-slate);
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      text-align: left;
+      padding: 14px 18px;
+      white-space: nowrap;
+    }
+
+    td {
+      padding: 17px 18px;
+      border-top: 1px solid var(--line);
+      color: #475569;
+      vertical-align: top;
+    }
+
+    td.strong {
+      color: var(--text);
+      font-weight: 800;
+    }
+
+    .right {
+      text-align: right;
+    }
+
+    .action-icons {
+      display: flex;
+      justify-content: flex-end;
+      gap: 7px;
+    }
+
+    .icon-button {
+      width: 34px;
+      height: 34px;
+      border-radius: 12px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      display: grid;
+      place-items: center;
+      color: #64748b;
+      cursor: pointer;
+      transition: 0.2s ease;
+    }
+
+    .icon-button:hover {
+      background: #eff6ff;
+      color: var(--primary);
+      border-color: #bfdbfe;
+    }
+
+    .icon-button.danger:hover {
+      background: #fef2f2;
+      color: #dc2626;
+      border-color: #fecaca;
+    }
+
+    .avatar {
+      width: 38px;
+      height: 38px;
+      border-radius: 999px;
+      background: #f1f5f9;
+      display: inline-grid;
+      place-items: center;
+      font-size: 12px;
+      font-weight: 800;
+      color: #475569;
+      margin-right: 12px;
+      vertical-align: middle;
+      flex: 0 0 auto;
+    }
+
+    .person-cell {
+      display: flex;
+      align-items: center;
+      min-width: 240px;
+    }
+
+    .person-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .person-secondary {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .report-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .report-card {
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      padding: 20px;
+      background: #fff;
+    }
+
+    .report-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .report-title {
+      margin-top: 22px;
+      font-size: 16px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      line-height: 1.3;
+    }
+
+    .export-list,
+    .summary-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 22px;
+    }
+
+    .export-item,
+    .summary-item {
+      min-height: 48px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      font-size: 14px;
+      font-weight: 700;
+      color: #475569;
+      background: #fff;
+    }
+
+    .checkmark {
+      width: 18px;
+      height: 18px;
+      border-radius: 6px;
+      border: 1px solid #cbd5e1;
+      display: grid;
+      place-items: center;
+      font-size: 12px;
+      color: #fff;
+      background: transparent;
+      flex: 0 0 auto;
+    }
+
+    .checkmark.active {
+      background: var(--primary);
+      border-color: var(--primary);
+    }
+
+    .metrics-row {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .metric-pill {
+      border-radius: 18px;
+      background: var(--soft-slate);
+      padding: 14px;
+    }
+
+    .metric-pill .mini-label {
+      font-size: 12px;
+    }
+
+    .metric-pill .mini-value {
+      font-size: 20px;
+    }
+
+    .empty-state {
+      padding: 30px 20px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .chip {
+      border-radius: 999px;
+      background: var(--soft-slate);
+      border: 1px solid var(--line);
+      padding: 7px 10px;
+      font-size: 12px;
+      color: #475569;
+      font-weight: 700;
+    }
+
+    .modal-root {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      z-index: 50;
+    }
+
+    .modal-root.open {
+      display: flex;
+    }
+
+    .modal-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.52);
+      backdrop-filter: blur(3px);
+    }
+
+    .modal {
+      position: relative;
+      width: min(980px, 100%);
+      max-height: calc(100vh - 40px);
+      overflow: auto;
+      background: #fff;
+      border-radius: 32px;
+      box-shadow: var(--shadow-float);
+    }
+
+    .modal.small {
+      width: min(720px, 100%);
+    }
+
+    .modal-head {
+      padding: 24px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      background: #fff;
+      z-index: 1;
+    }
+
+    .modal-title {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 850;
+      letter-spacing: -0.035em;
+    }
+
+    .modal-sub {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .modal-body {
+      padding: 24px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: 22px;
+    }
+
+    .modal-body.single {
+      display: block;
+    }
+
+    .modal-footer {
+      padding: 20px 24px;
+      border-top: 1px solid var(--line);
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      position: sticky;
+      bottom: 0;
+      background: #fff;
+    }
+
+    .preview-box {
+      background: var(--soft-slate);
+      border-radius: 24px;
+      padding: 20px;
+      align-self: start;
+      position: sticky;
+      top: 94px;
+    }
+
+    .preview-title {
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .preview-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      margin-top: 15px;
+      font-size: 13px;
+    }
+
+    .preview-row span:first-child {
+      color: var(--muted);
+    }
+
+    .preview-row span:last-child {
+      font-weight: 750;
+      text-align: right;
+    }
+
+    .preview-note {
+      margin-top: 24px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 14px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .close {
+      width: 38px;
+      height: 38px;
+      border-radius: 14px;
+      background: var(--soft-slate);
+      border: 1px solid var(--line);
+      display: grid;
+      place-items: center;
+      color: #64748b;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .toast-wrap {
+      position: fixed;
+      right: 20px;
+      bottom: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      z-index: 60;
+    }
+
+    .toast {
+      min-width: 260px;
+      max-width: 360px;
+      background: #0f172a;
+      color: #fff;
+      border-radius: 18px;
+      padding: 14px 16px;
+      box-shadow: var(--shadow-float);
+      font-size: 14px;
+      line-height: 1.45;
+      animation: slideIn 0.2s ease;
+    }
+
+    .toast.success {
+      background: #065f46;
+    }
+
+    .toast.error {
+      background: #991b1b;
+    }
+
+    .mt-18 {
+      margin-top: 18px;
+    }
+
+    .mt-22 {
+      margin-top: 22px;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @media (max-width: 1240px) {
+      .grid-4,
+      .metrics-row {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .grid-2-main,
+      .grid-form-main,
+      .modal-body,
+      .report-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .campaign-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .preview-box {
+        position: static;
+      }
+    }
+
+    @media (max-width: 980px) {
+      .app-shell {
+        width: 100%;
+        margin: 0;
+        min-height: 100vh;
+        border-radius: 0;
+      }
+
+      .app-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .topbar,
+      .content {
+        padding-left: 20px;
+        padding-right: 20px;
+      }
+
+      .topbar {
+        min-height: auto;
+        flex-direction: column;
+      }
+
+      .top-actions {
+        padding-top: 8px;
+        justify-content: flex-start;
+      }
+    }
+
+    @media (max-width: 700px) {
+      .grid-4,
+      .grid-3,
+      .field-grid-2,
+      .field-grid-3,
+      .metrics-row {
+        grid-template-columns: 1fr;
+      }
+
+      h1 {
+        font-size: 30px;
+      }
+
+      .section-card,
+      .card.pad,
+      .stat-card {
+        padding: 18px;
+      }
+
+      .modal {
+        border-radius: 24px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <div class="app-layout">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-icon">✓</div>
+          <div>
+            <div class="brand-title">TelegramTaskChecker</div>
+            <div class="brand-subtitle">Organizer Panel · FastAPI Ready</div>
+          </div>
+        </div>
+
+        <nav class="nav" id="sidebarNav">
+          <div class="nav-item active" data-page="dashboard">
+            <span class="nav-ico">▦</span>Дашборд
+          </div>
+          <div class="nav-item" data-page="campaigns">
+            <span class="nav-ico">☷</span>Кампании
+          </div>
+          <div class="nav-item" data-page="submissions">
+            <span class="nav-ico">▤</span>Работы
+          </div>
+          <div class="nav-item" data-page="users">
+            <span class="nav-ico">◌</span>Пользователи
+          </div>
+          <div class="nav-item" data-page="reports">
+            <span class="nav-ico">▥</span>Экспорт и отчёты
+          </div>
+        </nav>
+
+        <div class="sidebar-widget">
+          <div class="widget-title">⚙ Состояние интеграций</div>
+          <div class="widget-value" id="apiHealthValue">98%</div>
+          <div class="widget-note">
+            Интерфейс подготовлен под FastAPI: endpoints, статусы сервисов и экспорт завершённых кампаний в XLSX.
+          </div>
+          <div class="widget-line">
+            <span>FastAPI</span>
+            <span class="badge green" id="sidebarApiStatus">online</span>
+          </div>
+          <div class="widget-line">
+            <span>Telegram Bot</span>
+            <span class="badge green" id="sidebarBotStatus">stable</span>
+          </div>
+          <div class="widget-line">
+            <span>Redis queue</span>
+            <span class="badge orange" id="sidebarRedisStatus">high load</span>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <div class="eyebrow" id="pageEyebrow">Веб-интерфейс организатора</div>
+            <h1 id="pageTitle">Главная панель</h1>
+            <div class="page-description" id="pageDescription">
+              Обзор кампаний, очереди работ, экспортов, пользователей и технического состояния TelegramTaskChecker.
+            </div>
+          </div>
+          <div class="top-actions" id="topActions">
+            <button class="button secondary" id="exportAllTopBtn">↓ Экспорт в XLSX</button>
+            <button class="button secondary" id="refreshDataBtn">↻ Обновить данные</button>
+          </div>
+        </header>
+
+        <div class="content">
+          <section class="page active" data-page="dashboard">
+            <div class="grid-4">
+              <div class="card stat-card">
+                <div class="stat-top">
+                  <div>
+                    <div class="stat-title">Активных кампаний</div>
+                    <div class="stat-value" id="statActiveCampaigns">0</div>
+                    <div class="stat-hint">Экспертные, P2P и голосования</div>
+                  </div>
+                  <div class="icon-box icon-blue">☷</div>
+                </div>
+              </div>
+              <div class="card stat-card">
+                <div class="stat-top">
+                  <div>
+                    <div class="stat-title">Работ в очереди</div>
+                    <div class="stat-value" id="statQueue">0</div>
+                    <div class="stat-hint">Статусы uploaded и in_review</div>
+                  </div>
+                  <div class="icon-box icon-orange">▤</div>
+                </div>
+              </div>
+              <div class="card stat-card">
+                <div class="stat-top">
+                  <div>
+                    <div class="stat-title">Пользователей в бане</div>
+                    <div class="stat-value" id="statBanned">0</div>
+                    <div class="stat-hint">Ограничения доступа через Telegram-бота</div>
+                  </div>
+                  <div class="icon-box icon-red">⊘</div>
+                </div>
+              </div>
+              <div class="card stat-card">
+                <div class="stat-top">
+                  <div>
+                    <div class="stat-title">Завершено проверок</div>
+                    <div class="stat-value" id="statReviewed">0</div>
+                    <div class="stat-hint">За текущий учебный цикл</div>
+                  </div>
+                  <div class="icon-box icon-green">✓</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="grid-2-main mt-22">
+              <div class="section-card">
+                <div class="section-header">
+                  <div>
+                    <h2 class="section-title">Активные кампании</h2>
+                    <p class="section-note">
+                      Карточки живых кампаний с дедлайнами, форматом сдачи, статусом очереди и прогрессом проверки.
+                    </p>
+                  </div>
+                  <button class="button secondary" data-nav-target="campaigns">Открыть раздел</button>
+                </div>
+                <div class="campaign-grid" id="dashboardCampaigns"></div>
+              </div>
+
+              <div class="quick-card">
+                <div class="quick-head">
+                  <div class="icon-box" style="background:rgba(255,255,255,.1);color:#fff;border:1px solid rgba(255,255,255,.1)">⚡</div>
+                  <div>
+                    <div class="quick-title">Быстрые действия</div>
+                    <div class="quick-sub">
+                      Основные организаторские сценарии: очередь работ, XLSX-экспорт, блокировки и завершённые кампании.
+                    </div>
+                  </div>
+                </div>
+
+                <div class="quick-list">
+                  <div class="quick-action white" data-nav-target="submissions">
+                    <span>▤ Открыть очередь работ</span>
+                    <span>↗</span>
+                  </div>
+                  <div class="quick-action dark" id="quickExportBtn">
+                    <span>↓ Выгрузить завершённые кампании</span>
+                    <span>↗</span>
+                  </div>
+                  <div class="quick-action dark" data-nav-target="users">
+                    <span>⊘ Проверить блокировки пользователей</span>
+                    <span>↗</span>
+                  </div>
+                </div>
+
+                <div class="bot-status">
+                  <div style="font-weight:800;font-size:14px">Технический статус</div>
+                  <div class="status-stack">
+                    <div class="status-row">
+                      <span>FastAPI API</span>
+                      <span class="badge green" id="dashApiStatus">online</span>
+                    </div>
+                    <div class="status-row">
+                      <span>Telegram Bot</span>
+                      <span class="badge green" id="dashBotStatus">stable</span>
+                    </div>
+                    <div class="status-row">
+                      <span>Redis locks / TTL</span>
+                      <span class="badge orange" id="dashRedisStatus">нагрузка</span>
+                    </div>
+                    <div class="status-row">
+                      <span>Последняя синхронизация</span>
+                      <span id="lastSyncLabel">—</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="section-card mt-22">
+              <div class="section-header">
+                <div>
+                  <h2 class="section-title">Сводка по результатам</h2>
+                  <p class="section-note">
+                    Общие показатели по работам, распределённые по статусам из модели submissions/reviews.
+                  </p>
+                </div>
+              </div>
+              <div class="metrics-row" id="statusSummaryCards"></div>
+            </div>
+          </section>
+
+          <section class="page" data-page="campaigns">
+            <div class="grid-form-main">
+              <div class="section-card">
+                <div class="section-header">
+                  <div>
+                    <h2 class="section-title">Настройка кампании</h2>
+                    <p class="section-note">
+                      Поля соответствуют модели Campaign: тип, шкала, TTL, дедлайн, анонимность, формат сдачи, критерии и пересдачи.
+                    </p>
+                  </div>
+                  <div class="icon-box icon-blue">⚙</div>
+                </div>
+
+                <form class="field-stack" id="campaignForm">
+                  <label>
+                    <span class="label">Название кампании</span>
+                    <input class="input" name="title" placeholder="Например, Итоговые проекты · UX/UI" required />
+                  </label>
+
+                  <div class="field-grid-2">
+                    <label>
+                      <span class="label">Тип проверки</span>
+                      <select class="select" name="type">
+                        <option value="expert">Экспертная проверка</option>
+                        <option value="p2p">Взаимопроверка P2P</option>
+                        <option value="voting">Голосование</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      <span class="label">Формат сдачи</span>
+                      <select class="select" name="submissionFormat">
+                        <option value="document">Документ</option>
+                        <option value="text">Текст</option>
+                        <option value="photo">Фото</option>
+                        <option value="photo_document">Фото + документ</option>
+                        <option value="link">Ссылка</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <div class="field-grid-3">
+                    <label>
+                      <span class="label">Мин. балл</span>
+                      <input class="input" name="minScore" type="number" min="0" value="1" />
+                    </label>
+                    <label>
+                      <span class="label">Макс. балл</span>
+                      <input class="input" name="maxScore" type="number" min="1" value="10" />
+                    </label>
+                    <label>
+                      <span class="label">TTL проверки, минут</span>
+                      <input class="input" name="ttlMinutes" type="number" min="15" value="90" />
+                    </label>
+                  </div>
+
+                  <div class="field-grid-2">
+                    <label>
+                      <span class="label">Дедлайн кампании</span>
+                      <input class="input" name="deadline" type="datetime-local" />
+                    </label>
+                    <label>
+                      <span class="label">P2P-рецензий на работу</span>
+                      <input class="input" name="p2pReviewsRequired" type="number" min="1" value="3" />
+                    </label>
+                  </div>
+
+                  <label>
+                    <span class="label">Допустимые расширения</span>
+                    <input class="input" name="allowedExtensions" placeholder=".pdf, .docx, .zip, .fig" />
+                    <div class="helper-text">Для FastAPI удобно хранить как строку или нормализованный CSV/JSON.</div>
+                  </label>
+
+                  <label>
+                    <span class="label">Критерии оценивания</span>
+                    <textarea class="textarea" name="criteriaText" placeholder="Например: Актуальность, Архитектура решения, Качество презентации"></textarea>
+                  </label>
+
+                  <div class="checkbox-row">
+                    <input type="checkbox" name="isExpertAnon" />
+                    <span>Скрывать имена экспертов от студентов</span>
+                  </div>
+
+                  <div class="checkbox-row">
+                    <input type="checkbox" name="allowResubmissionBeforeReview" checked />
+                    <span>Разрешить замену работы до начала проверки</span>
+                  </div>
+
+                  <div class="checkbox-row">
+                    <input type="checkbox" name="allowResubmissionAfterReview" />
+                    <span>Разрешить пересдачу после завершённой проверки</span>
+                  </div>
+
+                  <div class="field-grid-2">
+                    <button type="button" class="button secondary full" id="campaignPreviewBtn">Открыть превью</button>
+                    <button type="submit" class="button primary full">Сохранить конфигурацию</button>
+                  </div>
+                </form>
+              </div>
+
+              <div class="section-card">
+                <div class="section-header">
+                  <div>
+                    <h2 class="section-title">Список кампаний</h2>
+                    <p class="section-note">
+                      Поиск, фильтрация по типу и отображение полей, которые уже есть в проекте.
+                    </p>
+                  </div>
+                  <div class="toolbar-group">
+                    <div class="search">
+                      <span class="search-icon">⌕</span>
+                      <input class="input" id="campaignSearch" placeholder="Название, тип или формат" />
+                    </div>
+                    <select class="select" id="campaignTypeFilter" style="width:170px">
+                      <option value="all">Все типы</option>
+                      <option value="expert">Эксперт</option>
+                      <option value="p2p">P2P</option>
+                      <option value="voting">Голосование</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Кампания</th>
+                        <th>Тип</th>
+                        <th>Формат</th>
+                        <th>Статус</th>
+                        <th>Дедлайн</th>
+                        <th>Прогресс</th>
+                        <th class="right">Действия</th>
+                      </tr>
+                    </thead>
+                    <tbody id="campaignsTableBody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="page" data-page="submissions">
+            <div class="section-card">
+              <div class="section-header">
+                <div>
+                  <h2 class="section-title">Работы и очередь проверки</h2>
+                  <p class="section-note">
+                    Мониторинг submissions по статусам uploaded / in_review / reviewed / rejected с привязкой к кампании и автору.
+                  </p>
+                </div>
+              </div>
+
+              <div class="toolbar">
+                <div class="toolbar-group">
+                  <div class="search">
+                    <span class="search-icon">⌕</span>
+                    <input class="input" id="submissionSearch" placeholder="Автор, Telegram ID, ID работы" />
+                  </div>
+                  <select class="select" id="submissionStatusFilter" style="width:200px">
+                    <option value="all">Все статусы</option>
+                    <option value="uploaded">Загружена</option>
+                    <option value="in_review">На проверке</option>
+                    <option value="reviewed">Проверена</option>
+                    <option value="rejected">Отклонена</option>
+                  </select>
+                  <select class="select" id="submissionCampaignFilter" style="width:220px">
+                    <option value="all">Все кампании</option>
+                  </select>
+                </div>
+                <div class="toolbar-group">
+                  <button class="button secondary" id="queueRefreshBtn">↻ Обновить очередь</button>
+                </div>
+              </div>
+
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Автор</th>
+                      <th>Кампания</th>
+                      <th>Формат</th>
+                      <th>Статус</th>
+                      <th>Оценка</th>
+                      <th>Проверяющий</th>
+                      <th>Дата</th>
+                    </tr>
+                  </thead>
+                  <tbody id="submissionsTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <section class="page" data-page="users">
+            <div class="section-card">
+              <div class="section-header">
+                <div>
+                  <h2 class="section-title">Пользователи и роли</h2>
+                  <p class="section-note">
+                    Список студентов, экспертов и организаторов, с баном/разбаном и отображением последних действий.
+                  </p>
+                </div>
+              </div>
+
+              <div class="toolbar">
+                <div class="toolbar-group">
+                  <div class="search">
+                    <span class="search-icon">⌕</span>
+                    <input class="input" id="userSearch" placeholder="Имя, группа или Telegram ID" />
+                  </div>
+                  <select class="select" id="userRoleFilter" style="width:180px">
+                    <option value="all">Все роли</option>
+                    <option value="student">Студент</option>
+                    <option value="expert">Эксперт</option>
+                    <option value="expert_organizer">Эксперт-организатор</option>
+                    <option value="organizer">Организатор</option>
+                  </select>
+                  <select class="select" id="userStatusFilter" style="width:170px">
+                    <option value="all">Все статусы</option>
+                    <option value="active">Активные</option>
+                    <option value="banned">Заблокированные</option>
+                  </select>
+                </div>
+                <div class="toolbar-group">
+                  <button class="button danger" id="openBanModalBtn">⊘ Бан / разбан</button>
+                </div>
+              </div>
+
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Пользователь</th>
+                      <th>Группа</th>
+                      <th>Роль</th>
+                      <th>Статус</th>
+                      <th>Кампания</th>
+                      <th>Последняя активность</th>
+                      <th class="right">Действия</th>
+                    </tr>
+                  </thead>
+                  <tbody id="usersTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <section class="page" data-page="reports">
+            <div class="grid-2-main">
+              <div class="stack-22">
+                <div class="section-card">
+                  <div class="section-header">
+                    <div>
+                      <h2 class="section-title">Завершённые кампании</h2>
+                      <p class="section-note">
+                        Экспорт в XLSX для организатора. Блок отражает текущую логику organizer/export в проекте.
+                      </p>
+                    </div>
+                    <button class="button primary" id="exportCompletedBtn">↓ Выгрузить всё в XLSX</button>
+                  </div>
+                  <div class="report-grid" id="reportsGrid"></div>
+                </div>
+
+                <div class="section-card">
+                  <div class="section-header">
+                    <div>
+                      <h2 class="section-title">Результаты кампаний</h2>
+                      <p class="section-note">
+                        Средние оценки, комментарии, статусы и параметры кампаний в формате будущего FastAPI response.
+                      </p>
+                    </div>
+                  </div>
+                  <div id="resultsSummaryList" class="summary-list"></div>
+                </div>
+              </div>
+
+              <div class="section-card">
+                <h2 class="section-title">Настройки XLSX-экспорта</h2>
+                <p class="section-note">
+                  Поля согласованы с текущим organizer export: работа, автор, проверяющий, оценка, комментарий, бан, дата проверки и критерии.
+                </p>
+
+                <div class="export-list" id="exportFieldsList"></div>
+                <button class="button primary full mt-22" id="buildExportBtn">↓ Сформировать XLSX</button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="modal-root" id="modalRoot">
+    <div class="modal-backdrop" id="modalBackdrop"></div>
+    <div class="modal small hidden" id="campaignPreviewModal">
+      <div class="modal-head">
+        <div>
+          <h2 class="modal-title">Превью конфигурации кампании</h2>
+          <p class="modal-sub">
+            Предпросмотр payload, который затем можно отправлять в FastAPI backend.
+          </p>
+        </div>
+        <button class="close" data-close-modal>×</button>
+      </div>
+      <div class="modal-body">
+        <div class="field-stack">
+          <div class="section-card" style="padding:18px">
+            <h3 style="margin:0 0 10px;font-size:16px">JSON-представление</h3>
+            <pre id="campaignPreviewJson" style="margin:0;white-space:pre-wrap;word-break:break-word;color:#334155;font-size:13px;line-height:1.5"></pre>
+          </div>
+        </div>
+        <div class="preview-box">
+          <div class="preview-title">Превью настроек</div>
+          <div class="preview-row"><span>Тип</span><span id="previewType">—</span></div>
+          <div class="preview-row"><span>Шкала</span><span id="previewScore">—</span></div>
+          <div class="preview-row"><span>TTL</span><span id="previewTTL">—</span></div>
+          <div class="preview-row"><span>Формат</span><span id="previewFormat">—</span></div>
+          <div class="preview-row"><span>Анонимность</span><span id="previewAnon">—</span></div>
+          <div class="preview-row"><span>Пересдача</span><span id="previewResubmit">—</span></div>
+          <div class="preview-note">
+            После интеграции с FastAPI этот объект может быть отправлен на endpoint создания или обновления кампании.
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="button secondary" data-close-modal>Закрыть</button>
+      </div>
+    </div>
+
+    <div class="modal small hidden" id="campaignDetailsModal">
+      <div class="modal-head">
+        <div>
+          <h2 class="modal-title">Карточка кампании</h2>
+          <p class="modal-sub">Подробная информация о настройках, прогрессе и метриках кампании.</p>
+        </div>
+        <button class="close" data-close-modal>×</button>
+      </div>
+      <div class="modal-body single">
+        <div id="campaignDetailsContent"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="button secondary" data-close-modal>Закрыть</button>
+      </div>
+    </div>
+
+    <div class="modal small hidden" id="banModal">
+      <div class="modal-head">
+        <div>
+          <h2 class="modal-title">Бан / разбан пользователя</h2>
+          <p class="modal-sub">Контроль доступа через Telegram-бота с фиксацией причины и уведомлением.</p>
+        </div>
+        <button class="close" data-close-modal>×</button>
+      </div>
+      <div class="modal-body single">
+        <form class="field-stack" id="banForm">
+          <label>
+            <span class="label">Пользователь</span>
+            <select class="select" id="banUserSelect"></select>
+          </label>
+          <label>
+            <span class="label">Действие</span>
+            <select class="select" id="banActionSelect">
+              <option value="ban">Заблокировать</option>
+              <option value="unban">Разблокировать</option>
+            </select>
+          </label>
+          <label>
+            <span class="label">Причина</span>
+            <textarea class="textarea" id="banReasonInput" placeholder="Опишите причину ограничения или основания для разблокировки"></textarea>
+          </label>
+          <div class="checkbox-row">
+            <input type="checkbox" id="notifyInTelegram" checked />
+            <span>Уведомить пользователя в Telegram</span>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="button secondary" data-close-modal>Отмена</button>
+        <button class="button danger" id="applyBanBtn">Применить</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-wrap" id="toastWrap"></div>
+
+  <script>
+    const mockDb = {
+      system: {
+        apiHealth: 98,
+        statuses: {
+          fastapi: "online",
+          bot: "stable",
+          redis: "high load",
+        },
+        lastSync: new Date().toLocaleString("ru-RU"),
+      },
+      campaigns: [
+        {
+          id: 12,
+          title: "Итоговые проекты · UX/UI",
+          type: "expert",
+          submissionFormat: "link",
+          minScore: 1,
+          maxScore: 10,
+          ttlMinutes: 90,
+          deadline: "2026-05-28 23:59",
+          isExpertAnon: true,
+          p2pReviewsRequired: 3,
+          votingType: null,
+          allowedExtensions: ".fig, .pdf",
+          criteria: ["Актуальность", "UI-система", "Презентация решения"],
+          allowResubmissionBeforeReview: true,
+          allowResubmissionAfterReview: false,
+          isActive: true,
+          progress: 72,
+          queued: 18,
+          reviewed: 124,
+          experts: 4,
+          avgScore: 8.7,
+          completed: false,
+        },
+        {
+          id: 13,
+          title: "P2P-рецензирование · Python",
+          type: "p2p",
+          submissionFormat: "document",
+          minScore: 1,
+          maxScore: 10,
+          ttlMinutes: 120,
+          deadline: "2026-05-31 20:00",
+          isExpertAnon: false,
+          p2pReviewsRequired: 3,
+          votingType: null,
+          allowedExtensions: ".py, .ipynb, .zip",
+          criteria: ["Корректность", "Структура", "Качество кода"],
+          allowResubmissionBeforeReview: true,
+          allowResubmissionAfterReview: true,
+          isActive: true,
+          progress: 48,
+          queued: 34,
+          reviewed: 88,
+          experts: 0,
+          avgScore: 7.9,
+          completed: false,
+        },
+        {
+          id: 14,
+          title: "Конкурс лендингов",
+          type: "voting",
+          submissionFormat: "photo_document",
+          minScore: 0,
+          maxScore: 5,
+          ttlMinutes: 60,
+          deadline: "2026-05-25 18:00",
+          isExpertAnon: false,
+          p2pReviewsRequired: 0,
+          votingType: "likes",
+          allowedExtensions: ".png, .jpg, .pdf",
+          criteria: ["Креатив", "Конверсионность", "Визуальная целостность"],
+          allowResubmissionBeforeReview: false,
+          allowResubmissionAfterReview: false,
+          isActive: true,
+          progress: 91,
+          queued: 7,
+          reviewed: 41,
+          experts: 9,
+          avgScore: 9.1,
+          completed: false,
+        },
+        {
+          id: 9,
+          title: "Портфолио · Весенний поток",
+          type: "expert",
+          submissionFormat: "document",
+          minScore: 1,
+          maxScore: 10,
+          ttlMinutes: 90,
+          deadline: "2026-04-30 23:59",
+          isExpertAnon: true,
+          p2pReviewsRequired: 0,
+          votingType: null,
+          allowedExtensions: ".pdf, .docx",
+          criteria: ["Содержательность", "Логика", "Оформление"],
+          allowResubmissionBeforeReview: false,
+          allowResubmissionAfterReview: false,
+          isActive: false,
+          progress: 100,
+          queued: 0,
+          reviewed: 136,
+          experts: 5,
+          avgScore: 8.3,
+          completed: true,
+        },
+        {
+          id: 7,
+          title: "Архитектура backend · FastAPI sprint",
+          type: "expert",
+          submissionFormat: "link",
+          minScore: 1,
+          maxScore: 10,
+          ttlMinutes: 75,
+          deadline: "2026-04-19 21:00",
+          isExpertAnon: false,
+          p2pReviewsRequired: 0,
+          votingType: null,
+          allowedExtensions: "github link, swagger link",
+          criteria: ["API design", "Validation", "Docs"],
+          allowResubmissionBeforeReview: true,
+          allowResubmissionAfterReview: true,
+          isActive: false,
+          progress: 100,
+          queued: 0,
+          reviewed: 64,
+          experts: 3,
+          avgScore: 8.9,
+          completed: true,
+        },
+      ],
+      users: [
+        { tgId: 710101, fullName: "Анна Лебедева", studyGroup: "UX-22", role: "student", isBanned: false, campaignId: 12, lastActivity: "Сегодня, 12:40" },
+        { tgId: 710102, fullName: "Илья Марков", studyGroup: "DS-21", role: "expert", isBanned: false, campaignId: 13, lastActivity: "Сегодня, 11:18" },
+        { tgId: 710103, fullName: "Марат Сафиуллин", studyGroup: "WEB-23", role: "student", isBanned: true, campaignId: 14, lastActivity: "Вчера, 19:04" },
+        { tgId: 710104, fullName: "Екатерина Смирнова", studyGroup: "PM-20", role: "expert", isBanned: false, campaignId: 12, lastActivity: "Вчера, 16:22" },
+        { tgId: 710105, fullName: "Ольга Тихонова", studyGroup: "ADM", role: "organizer", isBanned: false, campaignId: null, lastActivity: "Сегодня, 14:10" },
+        { tgId: 710106, fullName: "Дмитрий Колесов", studyGroup: "WEB-24", role: "expert_organizer", isBanned: false, campaignId: 7, lastActivity: "Сегодня, 10:03" },
+      ],
+      submissions: [
+        { id: 501, authorId: 710101, campaignId: 12, format: "link", status: "uploaded", score: null, reviewerId: null, createdAt: "2026-05-22 10:20" },
+        { id: 502, authorId: 710103, campaignId: 14, format: "photo_document", status: "in_review", score: null, reviewerId: 710104, createdAt: "2026-05-22 11:03" },
+        { id: 503, authorId: 710101, campaignId: 12, format: "link", status: "reviewed", score: 9, reviewerId: 710104, createdAt: "2026-05-20 18:44" },
+        { id: 504, authorId: 710102, campaignId: 13, format: "document", status: "reviewed", score: 8, reviewerId: 710106, createdAt: "2026-05-21 09:12" },
+        { id: 505, authorId: 710103, campaignId: 13, format: "document", status: "rejected", score: null, reviewerId: 710106, createdAt: "2026-05-19 20:10" },
+        { id: 506, authorId: 710101, campaignId: 13, format: "document", status: "in_review", score: null, reviewerId: 710102, createdAt: "2026-05-22 13:37" },
+        { id: 507, authorId: 710104, campaignId: 7, format: "link", status: "reviewed", score: 10, reviewerId: 710105, createdAt: "2026-04-18 17:40" },
+      ],
+      results: [
+        {
+          campaignId: 9,
+          statusSummary: { uploaded: 0, in_review: 0, reviewed: 136, rejected: 2 },
+          comments: ["Сильная структура портфолио", "Нужно улучшить оформление PDF"],
+        },
+        {
+          campaignId: 7,
+          statusSummary: { uploaded: 0, in_review: 0, reviewed: 64, rejected: 1 },
+          comments: ["Swagger оформлен отлично", "Нужна валидация query params"],
+        },
+      ],
+      exportFields: [
+        { key: "campaign_id", label: "ID кампании", enabled: true },
+        { key: "campaign_title", label: "Название кампании", enabled: true },
+        { key: "campaign_type", label: "Тип кампании", enabled: true },
+        { key: "submission_id", label: "ID работы", enabled: true },
+        { key: "submission_status", label: "Статус работы", enabled: true },
+        { key: "submission_created_at", label: "Дата отправки работы", enabled: true },
+        { key: "author_tg_id", label: "Telegram ID автора", enabled: true },
+        { key: "author_full_name", label: "Автор", enabled: true },
+        { key: "author_study_group", label: "Учебная группа", enabled: true },
+        { key: "reviewer_tg_id", label: "Telegram ID проверяющего", enabled: false },
+        { key: "reviewer_full_name", label: "Проверяющий", enabled: true },
+        { key: "score", label: "Оценка", enabled: true },
+        { key: "comment_text", label: "Комментарий", enabled: true },
+        { key: "ban_comment", label: "Причина бана", enabled: false },
+        { key: "review_created_at", label: "Дата проверки", enabled: true },
+        { key: "criteria_scores", label: "Критерии и баллы", enabled: true },
+      ],
+    };
+
+    const labels = {
+      pageMeta: {
+        dashboard: {
+          title: "Главная панель",
+          eyebrow: "Веб-интерфейс организатора",
+          description: "Обзор кампаний, очереди работ, экспортов, пользователей и технического состояния TelegramTaskChecker.",
+        },
+        campaigns: {
+          title: "Кампании",
+          eyebrow: "Campaign Management",
+          description: "Создание и управление кампаниями с параметрами из текущей модели FastAPI/SQLAlchemy.",
+        },
+        submissions: {
+          title: "Работы",
+          eyebrow: "Submission Queue",
+          description: "Очередь работ, статусы проверок, авторы, проверяющие и контроль дедлайнов.",
+        },
+        users: {
+          title: "Пользователи",
+          eyebrow: "Users & Access",
+          description: "Роли, Telegram ID, привязка к кампаниям и управление блокировками через интерфейс организатора.",
+        },
+        reports: {
+          title: "Экспорт и отчёты",
+          eyebrow: "XLSX Export",
+          description: "Выгрузка завершённых кампаний в XLSX, summary результатов и настройки состава данных.",
+        },
+      },
+      campaignTypes: {
+        expert: { text: "Эксперт", badge: "blue" },
+        p2p: { text: "P2P", badge: "orange" },
+        voting: { text: "Голосование", badge: "green" },
+      },
+      submissionFormats: {
+        document: "Документ",
+        text: "Текст",
+        photo: "Фото",
+        photo_document: "Фото + документ",
+        link: "Ссылка",
+      },
+      roles: {
+        student: { text: "Студент", badge: "slate" },
+        expert: { text: "Эксперт", badge: "blue" },
+        expert_organizer: { text: "Эксперт-орг.", badge: "violet" },
+        organizer: { text: "Организатор", badge: "green" },
+      },
+      submissionStatuses: {
+        uploaded: { text: "Загружена", badge: "orange" },
+        in_review: { text: "На проверке", badge: "blue" },
+        reviewed: { text: "Проверена", badge: "green" },
+        rejected: { text: "Отклонена", badge: "red" },
+      },
+    };
+
+    const state = {
+      currentPage: "dashboard",
+      selectedCampaignId: null,
+    };
+
+    const api = {
+      async getDashboard() {
+        return structuredClone({
+          campaigns: mockDb.campaigns,
+          users: mockDb.users,
+          submissions: mockDb.submissions,
+          system: mockDb.system,
+        });
+      },
+      async getCampaigns() {
+        return structuredClone(mockDb.campaigns);
+      },
+      async getSubmissions() {
+        return structuredClone(mockDb.submissions);
+      },
+      async getUsers() {
+        return structuredClone(mockDb.users);
+      },
+      async getResults() {
+        return structuredClone(mockDb.results);
+      },
+      async getExportFields() {
+        return structuredClone(mockDb.exportFields);
+      },
+      async saveCampaign(payload) {
+        const index = mockDb.campaigns.findIndex((item) => item.id === payload.id);
+        if (index >= 0) {
+          mockDb.campaigns[index] = { ...mockDb.campaigns[index], ...payload };
+          return structuredClone(mockDb.campaigns[index]);
+        }
+
+        const newCampaign = {
+          id: Math.max(...mockDb.campaigns.map((c) => c.id)) + 1,
+          progress: 0,
+          queued: 0,
+          reviewed: 0,
+          experts: payload.type === "voting" ? 0 : 1,
+          avgScore: 0,
+          completed: false,
+          isActive: true,
+          votingType: payload.type === "voting" ? "likes" : null,
+          ...payload,
+        };
+        mockDb.campaigns.unshift(newCampaign);
+        return structuredClone(newCampaign);
+      },
+      async setUserBanStatus({ tgId, isBanned }) {
+        const user = mockDb.users.find((item) => item.tgId === Number(tgId));
+        if (!user) throw new Error("Пользователь не найден");
+        user.isBanned = isBanned;
+        user.lastActivity = "Только что";
+        return structuredClone(user);
+      },
+      async buildXlsxExport(campaignIds) {
+        const campaigns = mockDb.campaigns.filter((item) => campaignIds.includes(item.id));
+        return {
+          ok: true,
+          campaigns,
+          filename: `telegram_task_checker_export_${Date.now()}.xlsx`,
+          rows: campaigns.reduce((sum, item) => sum + item.reviewed, 0),
+        };
+      },
+    };
+
+    const els = {
+      navItems: Array.from(document.querySelectorAll(".nav-item")),
+      pages: Array.from(document.querySelectorAll(".page")),
+      pageTitle: document.getElementById("pageTitle"),
+      pageEyebrow: document.getElementById("pageEyebrow"),
+      pageDescription: document.getElementById("pageDescription"),
+      toastWrap: document.getElementById("toastWrap"),
+      modalRoot: document.getElementById("modalRoot"),
+      campaignPreviewModal: document.getElementById("campaignPreviewModal"),
+      campaignDetailsModal: document.getElementById("campaignDetailsModal"),
+      banModal: document.getElementById("banModal"),
+      campaignForm: document.getElementById("campaignForm"),
+      campaignSearch: document.getElementById("campaignSearch"),
+      campaignTypeFilter: document.getElementById("campaignTypeFilter"),
+      campaignsTableBody: document.getElementById("campaignsTableBody"),
+      dashboardCampaigns: document.getElementById("dashboardCampaigns"),
+      statActiveCampaigns: document.getElementById("statActiveCampaigns"),
+      statQueue: document.getElementById("statQueue"),
+      statBanned: document.getElementById("statBanned"),
+      statReviewed: document.getElementById("statReviewed"),
+      statusSummaryCards: document.getElementById("statusSummaryCards"),
+      submissionSearch: document.getElementById("submissionSearch"),
+      submissionStatusFilter: document.getElementById("submissionStatusFilter"),
+      submissionCampaignFilter: document.getElementById("submissionCampaignFilter"),
+      submissionsTableBody: document.getElementById("submissionsTableBody"),
+      userSearch: document.getElementById("userSearch"),
+      userRoleFilter: document.getElementById("userRoleFilter"),
+      userStatusFilter: document.getElementById("userStatusFilter"),
+      usersTableBody: document.getElementById("usersTableBody"),
+      reportsGrid: document.getElementById("reportsGrid"),
+      exportFieldsList: document.getElementById("exportFieldsList"),
+      resultsSummaryList: document.getElementById("resultsSummaryList"),
+      campaignDetailsContent: document.getElementById("campaignDetailsContent"),
+      banUserSelect: document.getElementById("banUserSelect"),
+      banActionSelect: document.getElementById("banActionSelect"),
+      banReasonInput: document.getElementById("banReasonInput"),
+      notifyInTelegram: document.getElementById("notifyInTelegram"),
+      lastSyncLabel: document.getElementById("lastSyncLabel"),
+      apiHealthValue: document.getElementById("apiHealthValue"),
+      sidebarApiStatus: document.getElementById("sidebarApiStatus"),
+      sidebarBotStatus: document.getElementById("sidebarBotStatus"),
+      sidebarRedisStatus: document.getElementById("sidebarRedisStatus"),
+      dashApiStatus: document.getElementById("dashApiStatus"),
+      dashBotStatus: document.getElementById("dashBotStatus"),
+      dashRedisStatus: document.getElementById("dashRedisStatus"),
+    };
+
+    function badge(text, color) {
+      return '<span class="badge ' + color + '">' + text + "</span>";
+    }
+
+    function iconFromType(type) {
+      if (type === "expert") return "☷";
+      if (type === "p2p") return "⇄";
+      return "★";
+    }
+
+    function avatarInitials(name) {
+      return name
+        .split(" ")
+        .slice(0, 2)
+        .map((part) => part[0] || "")
+        .join("")
+        .toUpperCase();
+    }
+
+    function getCampaignById(id) {
+      return mockDb.campaigns.find((item) => item.id === Number(id));
+    }
+
+    function getUserById(id) {
+      return mockDb.users.find((item) => item.tgId === Number(id));
+    }
+
+    function formatCampaignType(type) {
+      return labels.campaignTypes[type]?.text || type;
+    }
+
+    function formatSubmissionFormat(format) {
+      return labels.submissionFormats[format] || format;
+    }
+
+    function formatRole(role) {
+      return labels.roles[role] || { text: role, badge: "slate" };
+    }
+
+    function formatStatus(status) {
+      return labels.submissionStatuses[status] || { text: status, badge: "slate" };
+    }
+
+    function campaignStatusBadge(campaign) {
+      if (campaign.completed || !campaign.isActive) return badge("Завершена", "green");
+      if (campaign.progress >= 85) return badge("Финальный этап", "green");
+      return badge("Активна", "blue");
+    }
+
+    function openModal(modal) {
+      els.modalRoot.classList.add("open");
+      [els.campaignPreviewModal, els.campaignDetailsModal, els.banModal].forEach((item) => {
+        item.classList.add("hidden");
+      });
+      modal.classList.remove("hidden");
+    }
+
+    function closeModals() {
+      els.modalRoot.classList.remove("open");
+      [els.campaignPreviewModal, els.campaignDetailsModal, els.banModal].forEach((item) => {
+        item.classList.add("hidden");
+      });
+    }
+
+    function showToast(message, type = "") {
+      const node = document.createElement("div");
+      node.className = "toast" + (type ? " " + type : "");
+      node.textContent = message;
+      els.toastWrap.appendChild(node);
+      setTimeout(() => {
+        node.remove();
+      }, 3000);
+    }
+
+    function setPage(page) {
+      state.currentPage = page;
+      els.navItems.forEach((item) => {
+        item.classList.toggle("active", item.dataset.page === page);
+      });
+      els.pages.forEach((item) => {
+        item.classList.toggle("active", item.dataset.page === page);
+      });
+      const meta = labels.pageMeta[page];
+      els.pageTitle.textContent = meta.title;
+      els.pageEyebrow.textContent = meta.eyebrow;
+      els.pageDescription.textContent = meta.description;
+    }
+
+    function renderDashboard(data) {
+      const activeCampaigns = data.campaigns.filter((item) => item.isActive);
+      const queueCount = data.submissions.filter((item) => ["uploaded", "in_review"].includes(item.status)).length;
+      const bannedCount = data.users.filter((item) => item.isBanned).length;
+      const reviewedCount = data.submissions.filter((item) => item.status === "reviewed").length;
+
+      els.statActiveCampaigns.textContent = activeCampaigns.length;
+      els.statQueue.textContent = queueCount;
+      els.statBanned.textContent = bannedCount;
+      els.statReviewed.textContent = reviewedCount;
+      els.lastSyncLabel.textContent = data.system.lastSync;
+      els.apiHealthValue.textContent = data.system.apiHealth + "%";
+
+      const setSystemBadge = (el, value) => {
+        el.textContent = value;
+        el.className = "badge " + (value === "online" || value === "stable" ? "green" : "orange");
+      };
+
+      setSystemBadge(els.sidebarApiStatus, data.system.statuses.fastapi);
+      setSystemBadge(els.sidebarBotStatus, data.system.statuses.bot);
+      setSystemBadge(els.sidebarRedisStatus, data.system.statuses.redis);
+      setSystemBadge(els.dashApiStatus, data.system.statuses.fastapi);
+      setSystemBadge(els.dashBotStatus, data.system.statuses.bot);
+      setSystemBadge(els.dashRedisStatus, data.system.statuses.redis);
+
+      els.dashboardCampaigns.innerHTML = activeCampaigns
+        .map((campaign) => {
+          const type = labels.campaignTypes[campaign.type];
+          const progressColor = campaign.progress > 80 ? "green" : campaign.progress > 50 ? "" : "orange";
+          return `
+            <div class="card campaign-card">
+              <div class="campaign-head">
+                <div>
+                  <span class="badge ${type.badge}">${type.text}</span>
+                  <div class="campaign-title">${campaign.title}</div>
+                  <div class="campaign-note">Формат: ${formatSubmissionFormat(campaign.submissionFormat)} · Дедлайн: ${campaign.deadline}</div>
+                </div>
+                <div class="icon-button" data-open-campaign="${campaign.id}">↗</div>
+              </div>
+              <div class="mini-metrics">
+                <div class="mini-metric">
+                  <div class="mini-label">В очереди</div>
+                  <div class="mini-value">${campaign.queued}</div>
+                </div>
+                <div class="mini-metric">
+                  <div class="mini-label">Эксперты / рецензенты</div>
+                  <div class="mini-value">${campaign.experts}</div>
+                </div>
+              </div>
+              <div class="progress-row"><span>Прогресс проверки</span><span>${campaign.progress}%</span></div>
+              <div class="progress-track"><div class="progress-fill ${progressColor}" style="width:${campaign.progress}%"></div></div>
+              <div class="chip-row">
+                <div class="chip">TTL: ${campaign.ttlMinutes} мин</div>
+                <div class="chip">Шкала: ${campaign.minScore}–${campaign.maxScore}</div>
+                <div class="chip">${campaign.isExpertAnon ? "Анонимность вкл" : "Анонимность выкл"}</div>
+              </div>
+            </div>
+          `;
+        })
+        .join("");
+
+      const statusCounters = [
+        { key: "uploaded", title: "Загружены", icon: "↑", color: "icon-orange" },
+        { key: "in_review", title: "На проверке", icon: "◌", color: "icon-blue" },
+        { key: "reviewed", title: "Проверены", icon: "✓", color: "icon-green" },
+        { key: "rejected", title: "Отклонены", icon: "!", color: "icon-red" },
+      ];
+
+      els.statusSummaryCards.innerHTML = statusCounters
+        .map((item) => {
+          const count = data.submissions.filter((sub) => sub.status === item.key).length;
+          return `
+            <div class="metric-pill">
+              <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+                <div>
+                  <div class="mini-label">${item.title}</div>
+                  <div class="mini-value">${count}</div>
+                </div>
+                <div class="icon-box ${item.color}" style="width:42px;height:42px;border-radius:14px;font-size:16px">${item.icon}</div>
+              </div>
+            </div>
+          `;
+        })
+        .join("");
+    }
+
+    function renderCampaigns(campaigns) {
+      const query = els.campaignSearch.value.trim().toLowerCase();
+      const typeFilter = els.campaignTypeFilter.value;
+
+      const rows = campaigns.filter((campaign) => {
+        const searchable = [campaign.title, campaign.type, campaign.submissionFormat].join(" ").toLowerCase();
+        const matchesQuery = !query || searchable.includes(query);
+        const matchesType = typeFilter === "all" || campaign.type === typeFilter;
+        return matchesQuery && matchesType;
+      });
+
+      els.campaignsTableBody.innerHTML = rows.length
+        ? rows.map((campaign) => {
+            const type = labels.campaignTypes[campaign.type];
+            return `
+              <tr>
+                <td class="strong">${campaign.title}</td>
+                <td>${badge(type.text, type.badge)}</td>
+                <td>${badge(formatSubmissionFormat(campaign.submissionFormat), "slate")}</td>
+                <td>${campaignStatusBadge(campaign)}</td>
+                <td>${campaign.deadline}</td>
+                <td>${campaign.progress}%</td>
+                <td>
+                  <div class="action-icons">
+                    <span class="icon-button" data-open-campaign="${campaign.id}">↗</span>
+                    <span class="icon-button" data-edit-campaign="${campaign.id}">✎</span>
+                  </div>
+                </td>
+              </tr>
+            `;
+          }).join("")
+        : '<tr><td colspan="7" class="empty-state">Ничего не найдено по текущим фильтрам.</td></tr>';
+    }
+
+    function renderSubmissionCampaignFilter(campaigns) {
+      const current = els.submissionCampaignFilter.value || "all";
+      els.submissionCampaignFilter.innerHTML = '<option value="all">Все кампании</option>' +
+        campaigns.map((item) => `<option value="${item.id}">${item.title}</option>`).join("");
+      els.submissionCampaignFilter.value = Array.from(els.submissionCampaignFilter.options).some(o => o.value === current) ? current : "all";
+    }
+
+    function renderSubmissions(submissions) {
+      const query = els.submissionSearch.value.trim().toLowerCase();
+      const statusFilter = els.submissionStatusFilter.value;
+      const campaignFilter = els.submissionCampaignFilter.value;
+
+      const rows = submissions.filter((submission) => {
+        const author = getUserById(submission.authorId);
+        const searchable = [
+          submission.id,
+          author?.fullName || "",
+          author?.tgId || "",
+        ].join(" ").toLowerCase();
+
+        const matchesQuery = !query || searchable.includes(query);
+        const matchesStatus = statusFilter === "all" || submission.status === statusFilter;
+        const matchesCampaign = campaignFilter === "all" || String(submission.campaignId) === campaignFilter;
+        return matchesQuery && matchesStatus && matchesCampaign;
+      });
+
+      els.submissionsTableBody.innerHTML = rows.length
+        ? rows.map((submission) => {
+            const author = getUserById(submission.authorId);
+            const reviewer = submission.reviewerId ? getUserById(submission.reviewerId) : null;
+            const campaign = getCampaignById(submission.campaignId);
+            const status = formatStatus(submission.status);
+
+            return `
+              <tr>
+                <td class="strong">#${submission.id}</td>
+                <td>
+                  <div class="person-cell">
+                    <span class="avatar">${avatarInitials(author?.fullName || "NA")}</span>
+                    <div class="person-meta">
+                      <span class="strong">${author?.fullName || "—"}</span>
+                      <span class="person-secondary">TG ID: ${author?.tgId || "—"}</span>
+                    </div>
+                  </div>
+                </td>
+                <td class="strong">${campaign?.title || "—"}</td>
+                <td>${badge(formatSubmissionFormat(submission.format), "slate")}</td>
+                <td>${badge(status.text, status.badge)}</td>
+                <td>${submission.score ?? "—"}</td>
+                <td>${reviewer ? reviewer.fullName : "—"}</td>
+                <td>${submission.createdAt}</td>
+              </tr>
+            `;
+          }).join("")
+        : '<tr><td colspan="8" class="empty-state">Подходящих работ не найдено.</td></tr>';
+    }
+
+    function renderUsers(users) {
+      const query = els.userSearch.value.trim().toLowerCase();
+      const roleFilter = els.userRoleFilter.value;
+      const statusFilter = els.userStatusFilter.value;
+
+      const rows = users.filter((user) => {
+        const searchable = [user.fullName, user.studyGroup, user.tgId].join(" ").toLowerCase();
+        const matchesQuery = !query || searchable.includes(query);
+        const matchesRole = roleFilter === "all" || user.role === roleFilter;
+        const matchesStatus =
+          statusFilter === "all" ||
+          (statusFilter === "active" && !user.isBanned) ||
+          (statusFilter === "banned" && user.isBanned);
+        return matchesQuery && matchesRole && matchesStatus;
+      });
+
+      els.usersTableBody.innerHTML = rows.length
+        ? rows.map((user) => {
+            const role = formatRole(user.role);
+            const campaign = user.campaignId ? getCampaignById(user.campaignId) : null;
+            return `
+              <tr>
+                <td class="strong">
+                  <div class="person-cell">
+                    <span class="avatar">${avatarInitials(user.fullName)}</span>
+                    <div class="person-meta">
+                      <span class="strong">${user.fullName}</span>
+                      <span class="person-secondary">Telegram ID: ${user.tgId}</span>
+                    </div>
+                  </div>
+                </td>
+                <td>${user.studyGroup || "—"}</td>
+                <td>${badge(role.text, role.badge)}</td>
+                <td>${user.isBanned ? badge("Забанен", "red") : badge("Активен", "green")}</td>
+                <td>${campaign ? campaign.title : "—"}</td>
+                <td>${user.lastActivity}</td>
+                <td>
+                  <div class="action-icons">
+                    <span class="icon-button ${user.isBanned ? "" : "danger"}" data-toggle-ban="${user.tgId}">
+                      ${user.isBanned ? "↺" : "⊘"}
+                    </span>
+                  </div>
+                </td>
+              </tr>
+            `;
+          }).join("")
+        : '<tr><td colspan="7" class="empty-state">Пользователи не найдены.</td></tr>';
+
+      els.banUserSelect.innerHTML = users
+        .map((user) => `<option value="${user.tgId}">${user.fullName} · ${user.tgId}</option>`)
+        .join("");
+    }
+
+    function renderReports(campaigns, results, exportFields) {
+      const completed = campaigns.filter((item) => item.completed);
+
+      els.reportsGrid.innerHTML = completed.length
+        ? completed.map((campaign) => `
+          <div class="report-card">
+            <div class="report-top">
+              <div class="icon-box icon-green">▥</div>
+              <span class="badge green">готово к XLSX</span>
+            </div>
+            <div class="report-title">${campaign.title}</div>
+            <div class="mini-metrics">
+              <div class="mini-metric">
+                <div class="mini-label">Проверено</div>
+                <div class="mini-value">${campaign.reviewed}</div>
+              </div>
+              <div class="mini-metric">
+                <div class="mini-label">Средний балл</div>
+                <div class="mini-value">${campaign.avgScore}</div>
+              </div>
+            </div>
+            <div class="chip-row">
+              <div class="chip">ID: ${campaign.id}</div>
+              <div class="chip">${formatSubmissionFormat(campaign.submissionFormat)}</div>
+              <div class="chip">TTL ${campaign.ttlMinutes} мин</div>
+            </div>
+            <button class="button secondary full mt-22" data-export-campaign="${campaign.id}">↓ Экспорт в XLSX</button>
+          </div>
+        `).join("")
+        : '<div class="empty-state">Нет завершённых кампаний для выгрузки.</div>';
+
+      els.resultsSummaryList.innerHTML = results.length
+        ? results.map((result) => {
+            const campaign = getCampaignById(result.campaignId);
+            return `
+              <div class="summary-item" style="display:block">
+                <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+                  <div>
+                    <div class="strong" style="font-weight:800;color:var(--text)">${campaign?.title || "—"}</div>
+                    <div class="muted" style="margin-top:4px">Средний балл: ${campaign?.avgScore ?? "—"} · Формат: ${formatSubmissionFormat(campaign?.submissionFormat || "")}</div>
+                  </div>
+                  ${campaign ? campaignStatusBadge(campaign) : ""}
+                </div>
+                <div class="chip-row">
+                  <div class="chip">uploaded: ${result.statusSummary.uploaded}</div>
+                  <div class="chip">in_review: ${result.statusSummary.in_review}</div>
+                  <div class="chip">reviewed: ${result.statusSummary.reviewed}</div>
+                  <div class="chip">rejected: ${result.statusSummary.rejected}</div>
+                </div>
+                <div class="helper-text">Комментарии: ${(result.comments || []).join(" · ") || "нет комментариев"}</div>
+              </div>
+            `;
+          }).join("")
+        : '<div class="empty-state">Результаты пока отсутствуют.</div>';
+
+      els.exportFieldsList.innerHTML = exportFields
+        .map((field, index) => `
+          <div class="export-item" data-export-field="${field.key}">
+            <span class="checkmark ${field.enabled ? "active" : ""}">${field.enabled ? "✓" : ""}</span>
+            <span>${field.label}</span>
+          </div>
+        `).join("");
+    }
+
+    function renderCampaignDetails(campaignId) {
+      const campaign = getCampaignById(campaignId);
+      if (!campaign) return;
+      const type = labels.campaignTypes[campaign.type];
+      els.campaignDetailsContent.innerHTML = `
+        <div class="grid-2-main" style="grid-template-columns:minmax(0,1fr) 300px">
+          <div class="section-card" style="padding:18px">
+            <div class="section-header">
+              <div>
+                <h3 class="section-title" style="font-size:18px">${campaign.title}</h3>
+                <p class="section-note">ID кампании: ${campaign.id} · ${formatSubmissionFormat(campaign.submissionFormat)}</p>
+              </div>
+              ${badge(type.text, type.badge)}
+            </div>
+            <div class="field-grid-2">
+              <div class="mini-metric"><div class="mini-label">Шкала</div><div class="mini-value">${campaign.minScore}–${campaign.maxScore}</div></div>
+              <div class="mini-metric"><div class="mini-label">TTL</div><div class="mini-value">${campaign.ttlMinutes} мин</div></div>
+              <div class="mini-metric"><div class="mini-label">Дедлайн</div><div class="mini-value" style="font-size:15px">${campaign.deadline}</div></div>
+              <div class="mini-metric"><div class="mini-label">P2P reviews</div><div class="mini-value">${campaign.p2pReviewsRequired}</div></div>
+            </div>
+            <div class="chip-row">
+              ${(campaign.criteria || []).map((criterion) => `<div class="chip">${criterion}</div>`).join("")}
+            </div>
+            <div class="summary-list">
+              <div class="summary-item">Анонимность эксперта: <strong>${campaign.isExpertAnon ? "включена" : "выключена"}</strong></div>
+              <div class="summary-item">Пересдача до проверки: <strong>${campaign.allowResubmissionBeforeReview ? "разрешена" : "запрещена"}</strong></div>
+              <div class="summary-item">Пересдача после проверки: <strong>${campaign.allowResubmissionAfterReview ? "разрешена" : "запрещена"}</strong></div>
+              <div class="summary-item">Допустимые расширения: <strong>${campaign.allowedExtensions || "—"}</strong></div>
+            </div>
+          </div>
+          <div class="preview-box">
+            <div class="preview-title">Текущая сводка</div>
+            <div class="preview-row"><span>Статус</span><span>${campaign.completed ? "Завершена" : "Активна"}</span></div>
+            <div class="preview-row"><span>Прогресс</span><span>${campaign.progress}%</span></div>
+            <div class="preview-row"><span>В очереди</span><span>${campaign.queued}</span></div>
+            <div class="preview-row"><span>Проверено</span><span>${campaign.reviewed}</span></div>
+            <div class="preview-row"><span>Средний балл</span><span>${campaign.avgScore}</span></div>
+            <div class="preview-note">Эта модалка может быть привязана к GET /api/campaigns/{id} после подключения FastAPI.</div>
+          </div>
+        </div>
+      `;
+      openModal(els.campaignDetailsModal);
+    }
+
+    function buildCampaignPayloadFromForm() {
+      const formData = new FormData(els.campaignForm);
+      const criteria = String(formData.get("criteriaText") || "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+      return {
+        title: String(formData.get("title") || "").trim(),
+        type: String(formData.get("type") || "expert"),
+        submissionFormat: String(formData.get("submissionFormat") || "document"),
+        minScore: Number(formData.get("minScore") || 0),
+        maxScore: Number(formData.get("maxScore") || 10),
+        ttlMinutes: Number(formData.get("ttlMinutes") || 90),
+        deadline: String(formData.get("deadline") || "").replace("T", " ") || "—",
+        p2pReviewsRequired: Number(formData.get("p2pReviewsRequired") || 0),
+        allowedExtensions: String(formData.get("allowedExtensions") || "").trim(),
+        criteriaText: String(formData.get("criteriaText") || "").trim(),
+        criteria,
+        isExpertAnon: formData.get("isExpertAnon") === "on",
+        allowResubmissionBeforeReview: formData.get("allowResubmissionBeforeReview") === "on",
+        allowResubmissionAfterReview: formData.get("allowResubmissionAfterReview") === "on",
+      };
+    }
+
+    function renderCampaignPreview(payload) {
+      document.getElementById("campaignPreviewJson").textContent = JSON.stringify(payload, null, 2);
+      document.getElementById("previewType").textContent = formatCampaignType(payload.type);
+      document.getElementById("previewScore").textContent = payload.minScore + "–" + payload.maxScore;
+      document.getElementById("previewTTL").textContent = payload.ttlMinutes + " мин";
+      document.getElementById("previewFormat").textContent = formatSubmissionFormat(payload.submissionFormat);
+      document.getElementById("previewAnon").textContent = payload.isExpertAnon ? "вкл" : "выкл";
+      document.getElementById("previewResubmit").textContent =
+        [payload.allowResubmissionBeforeReview ? "до проверки" : "", payload.allowResubmissionAfterReview ? "после проверки" : ""]
+          .filter(Boolean)
+          .join(", ") || "запрещена";
+      openModal(els.campaignPreviewModal);
+    }
+
+    function hydrateFormForCampaign(campaignId) {
+      const campaign = getCampaignById(campaignId);
+      if (!campaign) return;
+      els.campaignForm.title.value = campaign.title;
+      els.campaignForm.type.value = campaign.type;
+      els.campaignForm.submissionFormat.value = campaign.submissionFormat;
+      els.campaignForm.minScore.value = campaign.minScore;
+      els.campaignForm.maxScore.value = campaign.maxScore;
+      els.campaignForm.ttlMinutes.value = campaign.ttlMinutes;
+      els.campaignForm.deadline.value = campaign.deadline && campaign.deadline.includes(" ")
+        ? campaign.deadline.replace(" ", "T")
+        : "";
+      els.campaignForm.p2pReviewsRequired.value = campaign.p2pReviewsRequired;
+      els.campaignForm.allowedExtensions.value = campaign.allowedExtensions || "";
+      els.campaignForm.criteriaText.value = (campaign.criteria || []).join(", ");
+      els.campaignForm.isExpertAnon.checked = campaign.isExpertAnon;
+      els.campaignForm.allowResubmissionBeforeReview.checked = campaign.allowResubmissionBeforeReview;
+      els.campaignForm.allowResubmissionAfterReview.checked = campaign.allowResubmissionAfterReview;
+      state.selectedCampaignId = campaign.id;
+      setPage("campaigns");
+      showToast("Кампания загружена в форму редактирования");
+    }
+
+    async function exportCampaigns(campaignIds) {
+      const response = await api.buildXlsxExport(campaignIds);
+      if (response.ok) {
+        showToast(`Сформирован ${response.filename} · строк: ${response.rows}`, "success");
+      } else {
+        showToast("Не удалось сформировать XLSX", "error");
+      }
+    }
+
+    async function refreshAll() {
+      const [dashboard, campaigns, submissions, users, results, exportFields] = await Promise.all([
+        api.getDashboard(),
+        api.getCampaigns(),
+        api.getSubmissions(),
+        api.getUsers(),
+        api.getResults(),
+        api.getExportFields(),
+      ]);
+
+      mockDb.system = dashboard.system;
+      mockDb.campaigns = campaigns;
+      mockDb.submissions = submissions;
+      mockDb.users = users;
+      mockDb.results = results;
+      mockDb.exportFields = exportFields;
+
+      renderDashboard(dashboard);
+      renderSubmissionCampaignFilter(campaigns);
+      renderCampaigns(campaigns);
+      renderSubmissions(submissions);
+      renderUsers(users);
+      renderReports(campaigns, results, exportFields);
+    }
+
+    function bindEvents() {
+      els.navItems.forEach((item) => {
+        item.addEventListener("click", () => setPage(item.dataset.page));
+      });
+
+      document.querySelectorAll("[data-nav-target]").forEach((item) => {
+        item.addEventListener("click", () => setPage(item.dataset.navTarget));
+      });
+
+      document.getElementById("refreshDataBtn").addEventListener("click", async () => {
+        mockDb.system.lastSync = new Date().toLocaleString("ru-RU");
+        await refreshAll();
+        showToast("Данные обновлены", "success");
+      });
+
+      document.getElementById("queueRefreshBtn").addEventListener("click", async () => {
+        mockDb.system.lastSync = new Date().toLocaleString("ru-RU");
+        await refreshAll();
+        showToast("Очередь работ обновлена");
+      });
+
+      document.getElementById("campaignPreviewBtn").addEventListener("click", () => {
+        renderCampaignPreview(buildCampaignPayloadFromForm());
+      });
+
+      els.campaignForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const payload = buildCampaignPayloadFromForm();
+        if (!payload.title) {
+          showToast("Укажите название кампании", "error");
+          return;
+        }
+        if (payload.maxScore < payload.minScore) {
+          showToast("Максимальный балл не может быть меньше минимального", "error");
+          return;
+        }
+
+        if (state.selectedCampaignId) {
+          payload.id = state.selectedCampaignId;
+        }
+
+        const saved = await api.saveCampaign(payload);
+        await refreshAll();
+        state.selectedCampaignId = null;
+        els.campaignForm.reset();
+        els.campaignForm.minScore.value = 1;
+        els.campaignForm.maxScore.value = 10;
+        els.campaignForm.ttlMinutes.value = 90;
+        els.campaignForm.p2pReviewsRequired.value = 3;
+        showToast(`Кампания «${saved.title}» сохранена`, "success");
+      });
+
+      [els.campaignSearch, els.campaignTypeFilter].forEach((el) => {
+        el.addEventListener("input", () => renderCampaigns(mockDb.campaigns));
+        el.addEventListener("change", () => renderCampaigns(mockDb.campaigns));
+      });
+
+      [els.submissionSearch, els.submissionStatusFilter, els.submissionCampaignFilter].forEach((el) => {
+        el.addEventListener("input", () => renderSubmissions(mockDb.submissions));
+        el.addEventListener("change", () => renderSubmissions(mockDb.submissions));
+      });
+
+      [els.userSearch, els.userRoleFilter, els.userStatusFilter].forEach((el) => {
+        el.addEventListener("input", () => renderUsers(mockDb.users));
+        el.addEventListener("change", () => renderUsers(mockDb.users));
+      });
+
+      document.body.addEventListener("click", async (event) => {
+        const openCampaign = event.target.closest("[data-open-campaign]");
+        if (openCampaign) {
+          renderCampaignDetails(openCampaign.dataset.openCampaign);
+          return;
+        }
+
+        const editCampaign = event.target.closest("[data-edit-campaign]");
+        if (editCampaign) {
+          hydrateFormForCampaign(editCampaign.dataset.editCampaign);
+          return;
+        }
+
+        const toggleBan = event.target.closest("[data-toggle-ban]");
+        if (toggleBan) {
+          const user = getUserById(toggleBan.dataset.toggleBan);
+          if (!user) return;
+          els.banUserSelect.value = String(user.tgId);
+          els.banActionSelect.value = user.isBanned ? "unban" : "ban";
+          els.banReasonInput.value = "";
+          openModal(els.banModal);
+          return;
+        }
+
+        const exportCampaignBtn = event.target.closest("[data-export-campaign]");
+        if (exportCampaignBtn) {
+          await exportCampaigns([Number(exportCampaignBtn.dataset.exportCampaign)]);
+          return;
+        }
+
+        const exportField = event.target.closest("[data-export-field]");
+        if (exportField) {
+          const field = mockDb.exportFields.find((item) => item.key === exportField.dataset.exportField);
+          if (!field) return;
+          field.enabled = !field.enabled;
+          renderReports(mockDb.campaigns, mockDb.results, mockDb.exportFields);
+          return;
+        }
+
+        if (event.target.matches("[data-close-modal]") || event.target.id === "modalBackdrop") {
+          closeModals();
+        }
+      });
+
+      document.getElementById("openBanModalBtn").addEventListener("click", () => {
+        openModal(els.banModal);
+      });
+
+      document.getElementById("applyBanBtn").addEventListener("click", async () => {
+        const tgId = Number(els.banUserSelect.value);
+        const action = els.banActionSelect.value;
+        const user = getUserById(tgId);
+
+        if (!user) {
+          showToast("Пользователь не найден", "error");
+          return;
+        }
+
+        await api.setUserBanStatus({ tgId, isBanned: action === "ban" });
+        await refreshAll();
+        closeModals();
+        showToast(
+          `${user.fullName} ${action === "ban" ? "заблокирован" : "разблокирован"}${els.notifyInTelegram.checked ? " с уведомлением в Telegram" : ""}`,
+          action === "ban" ? "error" : "success"
+        );
+      });
+
+      document.getElementById("exportAllTopBtn").addEventListener("click", async () => {
+        const completedIds = mockDb.campaigns.filter((item) => item.completed).map((item) => item.id);
+        await exportCampaigns(completedIds);
+      });
+
+      document.getElementById("quickExportBtn").addEventListener("click", async () => {
+        setPage("reports");
+        const completedIds = mockDb.campaigns.filter((item) => item.completed).map((item) => item.id);
+        await exportCampaigns(completedIds);
+      });
+
+      document.getElementById("exportCompletedBtn").addEventListener("click", async () => {
+        const completedIds = mockDb.campaigns.filter((item) => item.completed).map((item) => item.id);
+        await exportCampaigns(completedIds);
+      });
+
+      document.getElementById("buildExportBtn").addEventListener("click", async () => {
+        const completedIds = mockDb.campaigns.filter((item) => item.completed).map((item) => item.id);
+        await exportCampaigns(completedIds);
+      });
+
+      window.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") closeModals();
+      });
+    }
+
+    async function init() {
+      bindEvents();
+      await refreshAll();
+    }
+
+    init();
+  </script>
+</body>
+</html>

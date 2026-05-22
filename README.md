@@ -150,3 +150,54 @@ The container entrypoint automatically:
 5. starts the Telegram bot
 
 This bot uses Telegram long polling, so it does not require an HTTP port to serve requests.
+
+## Organizer web panel
+
+The repository now also includes a FastAPI-based organizer web application in `src/web/`.
+
+It provides:
+
+- organizer dashboard with live metrics
+- campaign management API
+- user listing and ban/unban actions
+- report cards for campaigns
+- `.xlsx` export for campaign results
+- healthcheck endpoint
+
+### Run web panel locally
+
+Start the web application locally:
+
+```bash
+uvicorn src.web.app:app --reload
+```
+
+On Windows CMD:
+
+```cmd
+python -m uvicorn src.web.app:app --reload
+```
+
+After startup the organizer UI is available at:
+
+```text
+http://127.0.0.1:8000/
+```
+
+Useful endpoints:
+
+- `GET /health`
+- `GET /api/dashboard`
+- `GET /api/campaigns`
+- `POST /api/campaigns`
+- `PATCH /api/campaigns/{campaign_id}`
+- `GET /api/users`
+- `PATCH /api/users/{tg_id}/ban`
+- `GET /api/reports/campaigns`
+- `GET /api/reports/campaigns/{campaign_id}/export.xlsx`
+
+### Notes
+
+- The web app uses the existing PostgreSQL schema and async SQLAlchemy models.
+- If the database is empty, the UI returns valid empty states.
+- The current Docker entrypoint still starts the bot stack only. The web panel is intended for local development first and can later be split into a dedicated service or added to Docker Compose.

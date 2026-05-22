@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from src.config import config
+from src.db import models as _db_models  # noqa: F401
 from src.db.base import Base
 
 # Create async engine
@@ -39,7 +40,21 @@ async def init_db() -> None:
 async def _ensure_schema(conn) -> None:
     """Apply minimal schema updates for existing databases."""
     await conn.execute(
-        text("ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'expert_organizer'")
+        text(
+            """
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1
+                    FROM pg_type
+                    WHERE typname = 'user_role'
+                ) THEN
+                    ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'expert_organizer';
+                END IF;
+            END
+            $$;
+            """
+        )
     )
     await conn.execute(
         text(
@@ -69,6 +84,19 @@ async def _ensure_schema(conn) -> None:
         text(
             "ALTER TABLE users "
             "ADD COLUMN IF NOT EXISTS last_google_file_id VARCHAR(255)"
+        )
+    )
+    await conn.execute(
+        text(
+            "ALTER TABLE users "
+            "ADD COLUMN IF NOT EXISTS web_access_token VARCHAR(64)"
+        )
+    )
+    await conn.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_web_access_token "
+            "ON users (web_access_token) "
+            "WHERE web_access_token IS NOT NULL"
         )
     )
     await conn.execute(

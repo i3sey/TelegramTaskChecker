@@ -1,5 +1,7 @@
 """Authentication router for user registration."""
 
+import os
+
 from aiogram import Router, types, F
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -10,6 +12,7 @@ from src.db.models import UserRole
 from src.db.engine import session_scope
 from src.bot.services.user_service import (
     create_user,
+    ensure_web_access_token,
     get_campaign_accesses,
     get_user,
     grant_campaign_access,
@@ -85,6 +88,35 @@ async def _has_invite_access(user, session) -> bool:
 
     accesses = await get_campaign_accesses(user.tg_id, session)
     return any(_invite_matches_role(access.invite_role, user.role) for access in accesses)
+
+def _build_web_app_url(token: str) -> str | None:
+    """Build organizer frontend URL from environment."""
+    base_url = (
+        os.getenv("WEB_APP_URL")
+        or os.getenv("APP_URL")
+        or os.getenv("PUBLIC_URL")
+    )
+    if not base_url:
+        return None
+
+    normalized = base_url.rstrip("/")
+    return f"{normalized}/organizer/{token}"
+
+def _build_organizer_web_message(token: str) -> str:
+    """Build message with personal organizer frontend URL."""
+    web_url = _build_web_app_url(token)
+    if not web_url:
+        return (
+            "\n\n🌐 <b>Персональная ссылка организатора создана.</b>\n"
+            "Чтобы открыть фронтенд, укажите публичный адрес приложения "
+            "в переменной окружения <code>WEB_APP_URL</code>."
+        )
+
+    return (
+        "\n\n🌐 <b>Ваш персональный фронтенд:</b>\n"
+        f"<code>{web_url}</code>\n\n"
+        "По основному адресу интерфейс недоступен."
+    )
 
 # Command handlers
 @router.message(Command("start"))
@@ -317,6 +349,11 @@ async def reg_confirm_full_name(callback: types.CallbackQuery, state: FSMContext
                 )
                 await mark_invite_used(invite, session)
 
+            organizer_note = ""
+            if role in {UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER}:
+                web_access_token = await ensure_web_access_token(user, session)
+                organizer_note = _build_organizer_web_message(web_access_token)
+
         await state.clear()
 
         access_note = ""
@@ -327,7 +364,8 @@ async def reg_confirm_full_name(callback: types.CallbackQuery, state: FSMContext
             "✅ <b>Регистрация успешна!</b>\n\n"
             f"👤 <b>{full_name}</b>\n"
             f"🎭 Роль: <b>{_role_label(role)}</b>"
-            f"{access_note}\n\n"
+            f"{access_note}"
+            f"{organizer_note}\n\n"
             "Используйте /help для списка команд.",
             parse_mode="HTML",
             reply_markup=await get_keyboard_for_user(user),
@@ -607,6 +645,10 @@ async def process_role_change(callback: types.CallbackQuery, state: FSMContext):
 
         user = await update_user_role(tg_id=tg_id, role=role, session=session)
         has_access = await _has_invite_access(user, session)
+        organizer_note = ""
+        if role in {UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER}:
+            web_access_token = await ensure_web_access_token(user, session)
+            organizer_note = _build_organizer_web_message(web_access_token)
 
     await state.clear()
 
@@ -619,6 +661,7 @@ async def process_role_change(callback: types.CallbackQuery, state: FSMContext):
             "\n\nДоступ к функциям роли будет открыт после инвайта. "
             "Откройте ссылку приглашения"
         )
+    message_text += organizer_note
 
     await callback.message.edit_text(
         message_text,

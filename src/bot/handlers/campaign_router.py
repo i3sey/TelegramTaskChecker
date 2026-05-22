@@ -38,6 +38,8 @@ from src.bot.keyboards import (
     BTN_SUBMIT,
     BTN_MY_SUBMISSIONS,
     BTN_CREATE_CAMPAIGN,
+    BTN_VIEW_RESULTS,
+    BTN_EXPORT,
     BTN_HOURS_12,
     BTN_HOURS_24,
     BTN_HOURS_48,
@@ -401,10 +403,8 @@ async def _campaign_stats(campaign_id: int, session) -> dict[str, float | int]:
     }
 
 
-def _finish_campaigns_keyboard(campaigns: list[Campaign]) -> types.InlineKeyboardMarkup | None:
+def _finish_campaigns_keyboard(campaigns: list[Campaign]) -> types.InlineKeyboardMarkup:
     active = [campaign for campaign in campaigns if campaign.is_active]
-    if not active:
-        return None
 
     builder = InlineKeyboardBuilder()
     for campaign in active:
@@ -414,6 +414,18 @@ def _finish_campaigns_keyboard(campaigns: list[Campaign]) -> types.InlineKeyboar
                 callback_data=f"finish_campaign_{campaign.id}",
             )
         )
+
+    builder.row(
+        types.InlineKeyboardButton(
+            text=BTN_VIEW_RESULTS,
+            callback_data="org_menu_view_results",
+        ),
+        types.InlineKeyboardButton(
+            text=BTN_EXPORT,
+            callback_data="org_menu_export",
+        ),
+    )
+
     return builder.as_markup()
 
 

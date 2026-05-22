@@ -31,7 +31,6 @@ BTN_CREATE_CAMPAIGN = "🆕 Создать кампанию"
 BTN_MY_CAMPAIGNS = "📁 Мои кампании"
 BTN_VIEW_RESULTS = "🔎 Результаты"
 BTN_EXPORT = "📤 Экспорт"
-BTN_ANALYTICS = "📊 Аналитика"
 BTN_MORE = "⋯ Ещё"
 
 BTN_HOURS_12 = "12 часов"
@@ -89,9 +88,6 @@ def build_campaign_anonymous_keyboard() -> ReplyKeyboardMarkup:
 def build_organizer_more_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=BTN_VIEW_RESULTS, callback_data="org_menu_view_results")],
-            [InlineKeyboardButton(text=BTN_EXPORT, callback_data="org_menu_export")],
-            [InlineKeyboardButton(text=BTN_ANALYTICS, callback_data="org_menu_analytics")],
             [InlineKeyboardButton(text="🔐 Управлять банами", callback_data="org_menu_banned_users")],
         ]
     )
@@ -344,16 +340,14 @@ def get_keyboard_for_role(role: UserRole):
         return _mk_markup(
             [
                 [BTN_TAKE, BTN_QUEUE, BTN_EXPERT_STATS],
-                [BTN_CREATE_CAMPAIGN, BTN_MY_CAMPAIGNS, BTN_EXPORT],
-                [BTN_VIEW_RESULTS, BTN_ANALYTICS],
+                [BTN_CREATE_CAMPAIGN, BTN_MY_CAMPAIGNS],
                 [BTN_PROFILE, BTN_ROLE, BTN_HELP],
             ]
         )
     if role == UserRole.ORGANIZER:
         return _mk_markup(
             [
-                [BTN_CREATE_CAMPAIGN, BTN_MY_CAMPAIGNS, BTN_EXPORT],
-                [BTN_VIEW_RESULTS, BTN_ANALYTICS],
+                [BTN_CREATE_CAMPAIGN, BTN_MY_CAMPAIGNS],
                 [BTN_PROFILE, BTN_ROLE, BTN_HELP],
             ]
         )

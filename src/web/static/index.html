@@ -1,0 +1,1812 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TelegramTaskChecker — Organizer Panel</title>
+  <style>
+    :root {
+      --bg: #eef2f7;
+      --panel: #ffffff;
+      --panel-soft: #f8fafc;
+      --text: #0f172a;
+      --muted: #64748b;
+      --line: #e2e8f0;
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+      --radius: 22px;
+      --radius-sm: 14px;
+      --black: #020617;
+      --soft-blue: #eff6ff;
+      --soft-green: #ecfdf5;
+      --soft-orange: #fffbeb;
+      --soft-red: #fef2f2;
+      --soft-slate: #f8fafc;
+      --font: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      font-family: var(--font);
+      background: linear-gradient(180deg, #dde5ef 0%, #eef2f7 100%);
+      color: var(--text);
+    }
+
+    button, input, select, textarea {
+      font: inherit;
+    }
+
+    .app {
+      width: min(1440px, calc(100vw - 24px));
+      min-height: calc(100vh - 24px);
+      margin: 12px auto;
+      background: var(--bg);
+      border-radius: 30px;
+      overflow: hidden;
+      box-shadow: 0 24px 70px rgba(15, 23, 42, 0.16);
+      display: grid;
+      grid-template-columns: 280px 1fr;
+    }
+
+    .sidebar {
+      background: rgba(255, 255, 255, 0.95);
+      border-right: 1px solid var(--line);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      backdrop-filter: blur(14px);
+    }
+
+    .brand {
+      background: var(--black);
+      color: white;
+      border-radius: 24px;
+      padding: 18px;
+      display: flex;
+      gap: 14px;
+      align-items: center;
+    }
+
+    .brand-icon {
+      width: 46px;
+      height: 46px;
+      border-radius: 16px;
+      background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+      display: grid;
+      place-items: center;
+      font-weight: 800;
+      font-size: 18px;
+    }
+
+    .brand-title {
+      font-size: 16px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+
+    .brand-subtitle {
+      color: #94a3b8;
+      font-size: 12px;
+      margin-top: 4px;
+    }
+
+    .nav {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .nav-item {
+      border: 0;
+      background: transparent;
+      height: 48px;
+      border-radius: 16px;
+      padding: 0 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: #475569;
+      font-weight: 700;
+      cursor: pointer;
+      transition: .2s ease;
+      text-align: left;
+    }
+
+    .nav-item:hover {
+      background: #eef2ff;
+      color: var(--primary);
+    }
+
+    .nav-item.active {
+      background: var(--primary);
+      color: white;
+      box-shadow: 0 10px 24px rgba(37, 99, 235, 0.25);
+    }
+
+    .sidebar-footer {
+      margin-top: auto;
+      background: var(--soft-slate);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      padding: 18px;
+    }
+
+    .sidebar-footer h3 {
+      margin: 0;
+      font-size: 14px;
+    }
+
+    .sidebar-footer p {
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .main {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .topbar {
+      padding: 30px 36px 24px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(248, 250, 252, 0.78);
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 20px;
+    }
+
+    .eyebrow {
+      color: var(--primary);
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 8px 0 0;
+      font-size: 38px;
+      line-height: 1.05;
+      letter-spacing: -0.04em;
+    }
+
+    .page-description {
+      margin-top: 12px;
+      max-width: 780px;
+      color: var(--muted);
+      line-height: 1.5;
+      font-size: 15px;
+    }
+
+    .top-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding-top: 40px;
+      justify-content: flex-end;
+    }
+
+    .icon-button {
+      width: 38px;
+      height: 38px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: white;
+      color: #334155;
+      display: inline-grid;
+      place-items: center;
+      cursor: pointer;
+      transition: .2s ease;
+      box-shadow: var(--shadow);
+      font-size: 16px;
+      font-weight: 800;
+    }
+
+    .icon-button:hover {
+      background: #f8fafc;
+      transform: translateY(-1px) rotate(20deg);
+    }
+
+    .content {
+      padding: 28px 36px 40px;
+    }
+
+    .page {
+      display: none;
+    }
+
+    .page.active {
+      display: block;
+    }
+
+    .grid-4, .grid-3, .grid-2, .form-grid {
+      display: grid;
+      gap: 18px;
+    }
+
+    .grid-4 {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .grid-3 {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .grid-2 {
+      grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+    }
+
+    .form-grid {
+      grid-template-columns: minmax(380px, 460px) minmax(0, 1fr);
+    }
+
+    .stack {
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid rgba(226, 232, 240, .9);
+      border-radius: 28px;
+      box-shadow: var(--shadow);
+      padding: 22px;
+      min-width: 0;
+    }
+
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .section-title {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+    }
+
+    .section-note {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .button {
+      height: 42px;
+      border-radius: 16px;
+      border: 0;
+      padding: 0 16px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: .2s ease;
+      white-space: nowrap;
+    }
+
+    .button:hover {
+      transform: translateY(-1px);
+    }
+
+    .button.primary {
+      background: var(--primary);
+      color: white;
+      box-shadow: 0 10px 22px rgba(37, 99, 235, 0.22);
+    }
+
+    .button.primary:hover {
+      background: var(--primary-dark);
+    }
+
+    .button.secondary {
+      background: white;
+      color: #334155;
+      border: 1px solid var(--line);
+    }
+
+    .button.secondary:hover {
+      background: #f8fafc;
+    }
+
+    .button.success {
+      background: var(--soft-green);
+      color: #059669;
+      border: 1px solid #d1fae5;
+    }
+
+    .button.danger {
+      background: var(--soft-red);
+      color: #dc2626;
+      border: 1px solid #fecaca;
+    }
+
+    .button.full {
+      width: 100%;
+    }
+
+    .stat-card {
+      border-radius: 26px;
+      padding: 22px;
+    }
+
+    .stat-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 14px;
+    }
+
+    .stat-title {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .stat-value {
+      margin-top: 12px;
+      font-size: 34px;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+    }
+
+    .stat-hint {
+      margin-top: 6px;
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    .icon-box {
+      width: 48px;
+      height: 48px;
+      border-radius: 18px;
+      display: grid;
+      place-items: center;
+      font-size: 20px;
+      font-weight: 800;
+      flex: 0 0 auto;
+    }
+
+    .icon-blue { background: var(--soft-blue); color: var(--primary); border: 1px solid #dbeafe; }
+    .icon-green { background: var(--soft-green); color: #059669; border: 1px solid #d1fae5; }
+    .icon-orange { background: var(--soft-orange); color: #d97706; border: 1px solid #fef3c7; }
+    .icon-red { background: var(--soft-red); color: #dc2626; border: 1px solid #fee2e2; }
+
+    .campaign-grid,
+    .report-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .campaign-card,
+    .report-card {
+      border-radius: 26px;
+      padding: 20px;
+      background: white;
+      border: 1px solid var(--line);
+    }
+
+    .campaign-head,
+    .report-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .campaign-title,
+    .report-title {
+      margin: 14px 0 0;
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      line-height: 1.25;
+    }
+
+    .campaign-note,
+    .report-note {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .mini-metrics,
+    .metrics-row {
+      display: grid;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .mini-metrics {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .metrics-row {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .mini-metric,
+    .metric-pill {
+      background: var(--soft-slate);
+      border-radius: 18px;
+      padding: 14px;
+    }
+
+    .mini-label,
+    .pill-label {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .mini-value,
+    .pill-value {
+      margin-top: 6px;
+      font-size: 22px;
+      font-weight: 800;
+    }
+
+    .progress-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      margin: 18px 0 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .progress-track {
+      height: 8px;
+      background: #e5e7eb;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: var(--primary);
+      border-radius: 999px;
+    }
+
+    .quick-card {
+      background: var(--black);
+      color: white;
+      border-radius: 30px;
+      padding: 24px;
+    }
+
+    .quick-title {
+      font-size: 19px;
+      font-weight: 800;
+    }
+
+    .quick-sub {
+      color: #94a3b8;
+      font-size: 13px;
+      line-height: 1.45;
+      margin-top: 6px;
+    }
+
+    .quick-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 22px;
+    }
+
+    .quick-action {
+      min-height: 56px;
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,.08);
+      background: rgba(255,255,255,.07);
+      color: white;
+      padding: 0 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: 800;
+      cursor: pointer;
+      transition: .2s ease;
+    }
+
+    .quick-action:hover {
+      transform: translateY(-1px);
+      background: rgba(255,255,255,.11);
+    }
+
+    .status-box {
+      margin-top: 22px;
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 22px;
+      padding: 16px;
+      background: rgba(255,255,255,.06);
+    }
+
+    .status-line {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 13px;
+      color: #cbd5e1;
+      margin-top: 10px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 28px;
+      padding: 4px 11px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      border: 1px solid transparent;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+
+    .badge.blue { background: var(--soft-blue); color: var(--primary); border-color: #dbeafe; }
+    .badge.green { background: var(--soft-green); color: #059669; border-color: #d1fae5; }
+    .badge.orange { background: var(--soft-orange); color: #d97706; border-color: #fef3c7; }
+    .badge.red { background: var(--soft-red); color: #dc2626; border-color: #fee2e2; }
+    .badge.slate { background: #f1f5f9; color: #475569; border-color: #e2e8f0; }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .toolbar-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .label {
+      display: block;
+      margin-bottom: 8px;
+      color: #475569;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .input,
+    .select,
+    .textarea {
+      width: 100%;
+      min-height: 46px;
+      border: 1px solid var(--line);
+      background: white;
+      border-radius: 16px;
+      padding: 0 14px;
+      color: var(--text);
+      outline: none;
+      transition: border-color .2s ease, box-shadow .2s ease;
+    }
+
+    .textarea {
+      padding: 14px;
+      min-height: 110px;
+      resize: vertical;
+    }
+
+    .input:focus,
+    .select:focus,
+    .textarea:focus {
+      border-color: #93c5fd;
+      box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.08);
+    }
+
+    .field-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .field-grid-2,
+    .field-grid-3 {
+      display: grid;
+      gap: 14px;
+    }
+
+    .field-grid-2 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .field-grid-3 {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .checkbox-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      min-height: 50px;
+      border-radius: 18px;
+      padding: 14px 16px;
+      background: var(--soft-slate);
+      color: #475569;
+      font-weight: 700;
+    }
+
+    .checkbox-row input {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--primary);
+      flex: 0 0 auto;
+    }
+
+    .helper {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .table-wrap {
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: white;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 860px;
+      font-size: 14px;
+    }
+
+    th {
+      text-align: left;
+      background: var(--soft-slate);
+      color: var(--muted);
+      padding: 14px 16px;
+      font-size: 11px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    td {
+      padding: 16px;
+      border-top: 1px solid var(--line);
+      color: #475569;
+      vertical-align: top;
+    }
+
+    td strong {
+      color: var(--text);
+    }
+
+    .person-cell {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 220px;
+    }
+
+    .avatar {
+      width: 38px;
+      height: 38px;
+      border-radius: 999px;
+      background: #f1f5f9;
+      display: grid;
+      place-items: center;
+      font-size: 12px;
+      font-weight: 800;
+      color: #475569;
+      flex: 0 0 auto;
+    }
+
+    .person-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .person-secondary {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .empty-state,
+    .loading-state,
+    .error-box {
+      padding: 20px;
+      border-radius: 20px;
+      border: 1px dashed var(--line);
+      background: white;
+      color: var(--muted);
+    }
+
+    .error-box {
+      border-color: #fecaca;
+      background: #fff7f7;
+      color: #b91c1c;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    @media (max-width: 1200px) {
+      .grid-4,
+      .grid-3,
+      .campaign-grid,
+      .report-grid,
+      .metrics-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .grid-2,
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 960px) {
+      .app {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .topbar {
+        flex-direction: column;
+      }
+
+      .top-actions {
+        padding-top: 0;
+        justify-content: flex-start;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .content,
+      .topbar {
+        padding-left: 18px;
+        padding-right: 18px;
+      }
+
+      .grid-4,
+      .grid-3,
+      .campaign-grid,
+      .report-grid,
+      .metrics-row,
+      .field-grid-2,
+      .field-grid-3 {
+        grid-template-columns: 1fr;
+      }
+
+      h1 {
+        font-size: 30px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">TT</div>
+        <div>
+          <div class="brand-title">TelegramTaskChecker</div>
+          <div class="brand-subtitle">Organizer workflow panel</div>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <button class="nav-item active" data-page="dashboard">📊 Дашборд</button>
+        <button class="nav-item" data-page="campaigns">🗂 Кампании</button>
+        <button class="nav-item" data-page="users">👥 Пользователи</button>
+        <button class="nav-item" data-page="reports">📁 Отчёты</button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <h3>Локальный dev-only доступ</h3>
+        <p>
+          Панель работает без полноценной web-auth и предназначена для внутреннего использования
+          организаторами на первом этапе интеграции.
+        </p>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">Organizer Admin</div>
+          <h1 id="page-title">Дашборд организатора</h1>
+          <div class="page-description" id="page-description">
+            Живой обзор активных кампаний, очереди работ, проверки и состояния backend API.
+          </div>
+        </div>
+
+        <div class="top-actions"></div>
+      </header>
+
+      <section class="content">
+        <div id="global-message" class="hidden"></div>
+
+        <section class="page active" id="page-dashboard">
+          <div class="grid-4" id="dashboard-stats"></div>
+
+          <div style="height:18px"></div>
+
+          <div class="grid-2">
+            <div class="stack">
+              <div class="card">
+                <div class="section-header">
+                  <div>
+                    <h2 class="section-title">Активные кампании</h2>
+                    <p class="section-note">Кампании с прогрессом проверки и текущей очередью работ.</p>
+                  </div>
+                </div>
+                <div id="dashboard-campaigns"></div>
+              </div>
+            </div>
+
+            <div class="stack">
+              <div class="quick-card">
+                <div class="section-header">
+                  <div>
+                    <div class="quick-title">Состояние сервисов</div>
+                    <div class="quick-sub">Текущий статус backend API и базы данных.</div>
+                  </div>
+                  <button class="icon-button" id="refresh-button" title="Обновить данные" aria-label="Обновить данные">↻</button>
+                </div>
+
+                <div class="status-box">
+                  <div class="status-line"><span>Backend API</span><span id="status-api">—</span></div>
+                  <div class="status-line"><span>Database</span><span id="status-db">—</span></div>
+                  <div class="status-line"><span>Последняя проверка</span><span id="status-time">—</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="page" id="page-campaigns">
+          <div class="form-grid">
+            <div class="card">
+              <div class="section-header">
+                <div>
+                  <h2 class="section-title">Создание кампании</h2>
+                  <p class="section-note">Базовые параметры кампании для organizer panel.</p>
+                </div>
+              </div>
+
+              <form id="campaign-form" class="field-stack">
+                <input type="hidden" id="campaign-id" />
+
+                <div>
+                  <label class="label" for="campaign-title-input">Название</label>
+                  <input class="input" id="campaign-title-input" required placeholder="Например: Рубежный peer review" />
+                </div>
+
+                <div class="field-grid-2">
+                  <div>
+                    <label class="label" for="campaign-type-input">Тип кампании</label>
+                    <select class="select" id="campaign-type-input"></select>
+                  </div>
+                  <div>
+                    <label class="label" for="campaign-format-input">Формат отправки</label>
+                    <select class="select" id="campaign-format-input"></select>
+                  </div>
+                </div>
+
+                <div class="field-grid-3">
+                  <div>
+                    <label class="label" for="campaign-min-score-input">Мин. балл</label>
+                    <input class="input" id="campaign-min-score-input" type="number" value="0" />
+                  </div>
+                  <div>
+                    <label class="label" for="campaign-max-score-input">Макс. балл</label>
+                    <input class="input" id="campaign-max-score-input" type="number" value="100" />
+                  </div>
+                  <div>
+                    <label class="label" for="campaign-ttl-input">TTL (мин.)</label>
+                    <input class="input" id="campaign-ttl-input" type="number" value="1440" />
+                  </div>
+                </div>
+
+                <div class="field-grid-2">
+                  <div>
+                    <label class="label" for="campaign-p2p-input">Требуемо peer-review</label>
+                    <input class="input" id="campaign-p2p-input" type="number" value="3" />
+                  </div>
+                  <div>
+                    <label class="label" for="campaign-voting-type-input">Тип агрегации оценок</label>
+                    <input class="input" id="campaign-voting-type-input" placeholder="Например: average" />
+                  </div>
+                </div>
+
+                <div>
+                  <label class="label" for="campaign-deadline-input">Дедлайн</label>
+                  <input class="input" id="campaign-deadline-input" type="datetime-local" />
+                </div>
+
+                <div>
+                  <label class="label" for="campaign-extensions-input">Разрешённые расширения</label>
+                  <input class="input" id="campaign-extensions-input" placeholder="pdf, docx, zip" />
+                </div>
+
+                <div>
+                  <label class="label" for="campaign-criteria-input">Критерии</label>
+                  <textarea class="textarea" id="campaign-criteria-input" placeholder="Текст критериев оценки"></textarea>
+                </div>
+
+                <label class="checkbox-row">
+                  <input type="checkbox" id="campaign-anon-input" />
+                  <span>Анонимная экспертная проверка</span>
+                </label>
+
+                <label class="checkbox-row">
+                  <input type="checkbox" id="campaign-before-resubmit-input" />
+                  <span>Разрешить пересдачу до проверки</span>
+                </label>
+
+                <label class="checkbox-row">
+                  <input type="checkbox" id="campaign-after-resubmit-input" />
+                  <span>Разрешить пересдачу после проверки</span>
+                </label>
+
+                <label class="checkbox-row">
+                  <input type="checkbox" id="campaign-active-input" checked />
+                  <span>Кампания активна</span>
+                </label>
+
+                <div class="field-grid-2">
+                  <button class="button primary" type="submit" id="campaign-submit-button">Создать кампанию</button>
+                  <button class="button secondary" type="button" id="campaign-reset-button">Сбросить форму</button>
+                </div>
+              </form>
+            </div>
+
+            <div class="card">
+              <div class="section-header">
+                <div>
+                  <h2 class="section-title">Список кампаний</h2>
+                  <p class="section-note">Список из базы данных с базовыми метриками и быстрым редактированием.</p>
+                </div>
+              </div>
+
+              <div id="campaigns-list"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="page" id="page-users">
+          <div class="card">
+            <div class="section-header">
+              <div>
+                  <h2 class="section-title">Пользователи</h2>
+                  <p class="section-note">Фильтрация по роли, группе, бану и текстовому поиску без привязки к карточке кампании.</p>
+              </div>
+            </div>
+
+            <div class="toolbar">
+              <div class="toolbar-group">
+                <select class="select" id="users-role-filter" style="width: 180px;"></select>
+                <input class="input" id="users-group-filter" placeholder="Группа" style="width: 180px;" />
+                <select class="select" id="users-ban-filter" style="width: 180px;">
+                  <option value="">Бан: все</option>
+                  <option value="false">Только активные</option>
+                  <option value="true">Только забаненные</option>
+                </select>
+              </div>
+              <div class="toolbar-group">
+                <input class="input" id="users-search-filter" placeholder="Поиск по ФИО, группе, tg_id" style="width: 280px;" />
+                <button class="button secondary" id="users-apply-filter">Применить</button>
+              </div>
+            </div>
+
+            <div id="users-table-container"></div>
+          </div>
+        </section>
+
+        <section class="page" id="page-reports">
+          <div class="grid-2">
+            <div class="card">
+              <div class="section-header">
+                <div>
+                  <h2 class="section-title">Кампании для отчётов</h2>
+                  <p class="section-note">Краткие метрики по кампании и быстрый экспорт результатов в XLSX.</p>
+                </div>
+              </div>
+              <div id="reports-campaigns"></div>
+            </div>
+
+            <div class="card">
+              <div class="section-header">
+                <div>
+                  <h2 class="section-title">Поля экспорта</h2>
+                  <p class="section-note">Выбери колонки, которые нужно включить в XLSX-выгрузку.</p>
+                </div>
+              </div>
+
+              <div id="report-fields"></div>
+              <div class="helper">Если ничего не выбрано, экспортируются все доступные поля.</div>
+
+              <div style="height:18px"></div>
+
+              <button class="button primary full" id="export-selected-button" disabled>Скачать XLSX по выбранной кампании</button>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const ROLE_OPTIONS = [
+      { value: "", label: "Роль: все" },
+      { value: "student", label: "student" },
+      { value: "expert", label: "expert" },
+      { value: "organizer", label: "organizer" },
+      { value: "expert_organizer", label: "expert_organizer" },
+    ];
+
+    const CAMPAIGN_TYPE_OPTIONS = [
+      { value: "expert_review", label: "expert_review — экспертная проверка" },
+      { value: "peer_review", label: "peer_review — peer review" },
+    ];
+
+    const SUBMISSION_FORMAT_OPTIONS = [
+      { value: "document", label: "document" },
+      { value: "text", label: "text" },
+      { value: "link", label: "link" },
+    ];
+
+    const WEB_BASE_PATH = window.location.pathname.replace(/\/$/, "");
+    const apiUrl = (path) => `${WEB_BASE_PATH}${path}`;
+
+    const state = {
+      currentPage: "dashboard",
+      dashboard: null,
+      campaigns: [],
+      users: [],
+      reports: [],
+      exportFields: [],
+      selectedCampaignId: null,
+      selectedExportFields: new Set(),
+      health: null,
+    };
+
+    const pageMeta = {
+      dashboard: {
+        title: "Дашборд организатора",
+        description: "Живой обзор активных кампаний, очереди работ, проверки и состояния backend API.",
+      },
+      campaigns: {
+        title: "Кампании",
+        description: "Создание, базовое редактирование и управление активностью кампаний из БД.",
+      },
+      users: {
+        title: "Пользователи",
+        description: "Список пользователей с фильтрами по роли, группе, бану и поиском по tg_id/ФИО.",
+      },
+      reports: {
+        title: "Отчёты и экспорт",
+        description: "Краткие метрики по кампаниям и выгрузка результатов кампании в формате .xlsx.",
+      },
+    };
+
+    const els = {
+      pageTitle: document.getElementById("page-title"),
+      pageDescription: document.getElementById("page-description"),
+      globalMessage: document.getElementById("global-message"),
+      navItems: [...document.querySelectorAll(".nav-item")],
+      pages: [...document.querySelectorAll(".page")],
+      dashboardStats: document.getElementById("dashboard-stats"),
+      dashboardCampaigns: document.getElementById("dashboard-campaigns"),
+      statusApi: document.getElementById("status-api"),
+      statusDb: document.getElementById("status-db"),
+      statusTime: document.getElementById("status-time"),
+      campaignsList: document.getElementById("campaigns-list"),
+      usersTableContainer: document.getElementById("users-table-container"),
+      reportsCampaigns: document.getElementById("reports-campaigns"),
+      reportFields: document.getElementById("report-fields"),
+      exportSelectedButton: document.getElementById("export-selected-button"),
+
+      refreshButton: document.getElementById("refresh-button"),
+
+      campaignForm: document.getElementById("campaign-form"),
+      campaignId: document.getElementById("campaign-id"),
+      campaignTitle: document.getElementById("campaign-title-input"),
+      campaignType: document.getElementById("campaign-type-input"),
+      campaignFormat: document.getElementById("campaign-format-input"),
+      campaignMinScore: document.getElementById("campaign-min-score-input"),
+      campaignMaxScore: document.getElementById("campaign-max-score-input"),
+      campaignTtl: document.getElementById("campaign-ttl-input"),
+      campaignP2p: document.getElementById("campaign-p2p-input"),
+      campaignVotingType: document.getElementById("campaign-voting-type-input"),
+      campaignDeadline: document.getElementById("campaign-deadline-input"),
+      campaignExtensions: document.getElementById("campaign-extensions-input"),
+      campaignCriteria: document.getElementById("campaign-criteria-input"),
+      campaignAnon: document.getElementById("campaign-anon-input"),
+      campaignBeforeResubmit: document.getElementById("campaign-before-resubmit-input"),
+      campaignAfterResubmit: document.getElementById("campaign-after-resubmit-input"),
+      campaignActive: document.getElementById("campaign-active-input"),
+      campaignSubmitButton: document.getElementById("campaign-submit-button"),
+      campaignResetButton: document.getElementById("campaign-reset-button"),
+
+      usersRoleFilter: document.getElementById("users-role-filter"),
+      usersGroupFilter: document.getElementById("users-group-filter"),
+      usersBanFilter: document.getElementById("users-ban-filter"),
+      usersSearchFilter: document.getElementById("users-search-filter"),
+      usersApplyFilter: document.getElementById("users-apply-filter"),
+    };
+
+    function escapeHtml(value) {
+      const span = document.createElement("span");
+      span.textContent = String(value ?? "");
+      return span.innerHTML;
+    }
+
+    function formatDate(value) {
+      if (!value) return "—";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return new Intl.DateTimeFormat("ru-RU", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(date);
+    }
+
+    function initials(name) {
+      const parts = String(name || "U").trim().split(/\s+/).slice(0, 2);
+      return parts.map((part) => part[0]?.toUpperCase() || "").join("") || "U";
+    }
+
+    function badgeClassByBool(flag) {
+      return flag ? "green" : "slate";
+    }
+
+    function badge(text, color = "slate") {
+      return `<span class="badge ${color}">${escapeHtml(text)}</span>`;
+    }
+
+    function statusBadge(value) {
+      const map = {
+        uploaded: ["uploaded", "orange"],
+        in_review: ["in_review", "blue"],
+        reviewed: ["reviewed", "green"],
+        rejected: ["rejected", "red"],
+      };
+      const [label, color] = map[value] || [value || "unknown", "slate"];
+      return badge(label, color);
+    }
+
+    function roleBadge(role) {
+      const colors = {
+        student: "slate",
+        expert: "blue",
+        organizer: "green",
+        expert_organizer: "orange",
+      };
+      return badge(role || "unknown", colors[role] || "slate");
+    }
+
+    function renderMessage(message, type = "info") {
+      if (!message) {
+        els.globalMessage.className = "hidden";
+        els.globalMessage.innerHTML = "";
+        return;
+      }
+
+      const className = type === "error" ? "error-box" : "empty-state";
+      els.globalMessage.className = className;
+      els.globalMessage.textContent = message;
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    async function apiFetch(url, options = {}) {
+      const response = await fetch(url, {
+        headers: {
+          "Content-Type": "application/json",
+          ...(options.headers || {}),
+        },
+        ...options,
+      });
+
+      if (!response.ok) {
+        let detail = `HTTP ${response.status}`;
+        try {
+          const payload = await response.json();
+          if (payload?.detail) {
+            detail = typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail);
+          }
+        } catch (_) {}
+        throw new Error(detail);
+      }
+
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        return response.json();
+      }
+      return response;
+    }
+
+    function setPage(page) {
+      state.currentPage = page;
+      els.navItems.forEach((item) => item.classList.toggle("active", item.dataset.page === page));
+      els.pages.forEach((section) => section.classList.toggle("active", section.id === `page-${page}`));
+
+      const meta = pageMeta[page];
+      els.pageTitle.textContent = meta.title;
+      els.pageDescription.textContent = meta.description;
+    }
+
+    function populateStaticSelects() {
+      els.usersRoleFilter.innerHTML = ROLE_OPTIONS.map((item) => `<option value="${item.value}">${item.label}</option>`).join("");
+      els.campaignType.innerHTML = CAMPAIGN_TYPE_OPTIONS.map((item) => `<option value="${item.value}">${item.label}</option>`).join("");
+      els.campaignFormat.innerHTML = SUBMISSION_FORMAT_OPTIONS.map((item) => `<option value="${item.value}">${item.label}</option>`).join("");
+    }
+
+    function renderDashboard() {
+      const data = state.dashboard;
+      if (!data) {
+        els.dashboardStats.innerHTML = `<div class="loading-state">Загрузка дашборда…</div>`;
+        els.dashboardCampaigns.innerHTML = "";
+        return;
+      }
+
+      const stats = [
+        {
+          title: "Активные кампании",
+          value: data.stats.active_campaigns,
+          hint: "Кампании, доступные сейчас участникам и проверяющим.",
+          icon: "🗂",
+          iconClass: "icon-blue",
+        },
+        {
+          title: "Работ в очереди",
+          value: data.stats.submissions_in_queue,
+          hint: "Работы со статусом uploaded или in_review.",
+          icon: "⏳",
+          iconClass: "icon-orange",
+        },
+        {
+          title: "Сейчас проверяются",
+          value: Math.max(0, Number(data.stats.submissions_in_queue || 0) - Number(data.stats.waiting_review || 0)),
+          hint: "Работы со статусом in_review.",
+          icon: "👀",
+          iconClass: "icon-red",
+        },
+        {
+          title: "Проверено",
+          value: data.stats.reviewed_submissions,
+          hint: "Завершённые проверки по всем кампаниям.",
+          icon: "✓",
+          iconClass: "icon-green",
+        },
+      ];
+
+      els.dashboardStats.innerHTML = stats.map((item) => `
+        <div class="card stat-card">
+          <div class="stat-top">
+            <div>
+              <div class="stat-title">${escapeHtml(item.title)}</div>
+              <div class="stat-value">${escapeHtml(item.value)}</div>
+              <div class="stat-hint">${escapeHtml(item.hint)}</div>
+            </div>
+            <div class="icon-box ${item.iconClass}">${item.icon}</div>
+          </div>
+        </div>
+      `).join("");
+
+      if (!data.campaigns.length) {
+        els.dashboardCampaigns.innerHTML = `<div class="empty-state">Пока нет кампаний для отображения.</div>`;
+      } else {
+        els.dashboardCampaigns.innerHTML = `<div class="campaign-grid">` + data.campaigns.map((item) => `
+          <div class="campaign-card">
+            <div class="campaign-head">
+              <div>${badge(item.is_active ? "active" : "inactive", item.is_active ? "green" : "slate")}</div>
+              <div>${badge(item.type, "blue")}</div>
+            </div>
+            <div class="campaign-title">${escapeHtml(item.title)}</div>
+            <div class="campaign-note">
+              Формат: ${escapeHtml(item.submission_format)} · Дедлайн: ${escapeHtml(formatDate(item.deadline_at))}
+            </div>
+
+            <div class="mini-metrics">
+              <div class="mini-metric">
+                <div class="mini-label">В очереди</div>
+                <div class="mini-value">${escapeHtml(item.queue_count)}</div>
+              </div>
+              <div class="mini-metric">
+                <div class="mini-label">Проверено</div>
+                <div class="mini-value">${escapeHtml(item.reviewed_count)}</div>
+              </div>
+            </div>
+
+            <div class="progress-row">
+              <span>Прогресс проверки</span>
+              <strong>${escapeHtml(item.completion_percent)}%</strong>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill" style="width:${Math.max(0, Math.min(100, item.completion_percent))}%"></div>
+            </div>
+          </div>
+        `).join("") + `</div>`;
+      }
+
+      els.statusApi.innerHTML = badge(data.stats.api_status, "green");
+      els.statusDb.innerHTML = badge(data.stats.db_status, "green");
+      els.statusTime.textContent = formatDate(new Date().toISOString());
+    }
+
+    function renderCampaigns() {
+      if (!state.campaigns.length) {
+        els.campaignsList.innerHTML = `<div class="empty-state">Кампании пока отсутствуют. Создай первую кампанию через форму слева.</div>`;
+        return;
+      }
+
+      els.campaignsList.innerHTML = `<div class="stack">` + state.campaigns.map((campaign) => `
+          <div class="campaign-card">
+            <div class="campaign-head">
+              <div>${badge(campaign.is_active ? "active" : "inactive", campaign.is_active ? "green" : "slate")}</div>
+              <div class="actions">
+                <button class="button secondary js-edit-campaign" data-id="${campaign.id}">Редактировать</button>
+                <button class="button ${campaign.is_active ? "danger" : "success"} js-toggle-campaign" data-id="${campaign.id}" data-next="${campaign.is_active ? "false" : "true"}">
+                  ${campaign.is_active ? "Деактивировать" : "Активировать"}
+                </button>
+              </div>
+            </div>
+
+            <div class="campaign-title">${escapeHtml(campaign.title)}</div>
+            <div class="campaign-note">
+              ${escapeHtml(campaign.type)} · ${escapeHtml(campaign.submission_format)} ·
+              дедлайн: ${escapeHtml(formatDate(campaign.campaign_deadline_at))}
+            </div>
+
+            <div class="helper">
+              Диапазон баллов: ${escapeHtml(campaign.min_score)}–${escapeHtml(campaign.max_score)} · TTL: ${escapeHtml(campaign.ttl_minutes)} мин. ·
+              peer-review: ${escapeHtml(campaign.p2p_reviews_required)} · voting: ${escapeHtml(campaign.voting_type || "—")}
+            </div>
+
+            <div class="mini-metrics">
+              <div class="mini-metric">
+                <div class="mini-label">Работ всего</div>
+                <div class="mini-value">${escapeHtml(campaign.submissions_total)}</div>
+              </div>
+              <div class="mini-metric">
+                <div class="mini-label">В очереди</div>
+                <div class="mini-value">${escapeHtml(campaign.queue_count)}</div>
+              </div>
+              <div class="mini-metric">
+                <div class="mini-label">Проверено</div>
+                <div class="mini-value">${escapeHtml(campaign.reviewed_count)}</div>
+              </div>
+              <div class="mini-metric">
+                <div class="mini-label">Средний балл</div>
+                <div class="mini-value">${escapeHtml(campaign.average_score ?? "—")}</div>
+              </div>
+            </div>
+          </div>
+      `).join("") + `</div>`;
+
+      els.campaignsList.querySelectorAll(".js-edit-campaign").forEach((button) => {
+        button.addEventListener("click", () => {
+          const campaign = state.campaigns.find((item) => item.id === Number(button.dataset.id));
+          if (campaign) {
+            fillCampaignForm(campaign);
+            renderMessage(`Кампания #${campaign.id} загружена в форму редактирования.`, "info");
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }
+        });
+      });
+
+      els.campaignsList.querySelectorAll(".js-toggle-campaign").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const id = Number(button.dataset.id);
+          const next = button.dataset.next === "true";
+          try {
+            await apiFetch(apiUrl(`/api/campaigns/${id}`), {
+              method: "PATCH",
+              body: JSON.stringify({ is_active: next }),
+            });
+            renderMessage(`Статус кампании #${id} обновлён.`, "info");
+            await loadCampaigns();
+            await loadDashboard();
+            await loadReports();
+          } catch (error) {
+            renderMessage(`Не удалось обновить кампанию: ${error.message}`, "error");
+          }
+        });
+      });
+    }
+
+    function renderUsers() {
+      if (!state.users.length) {
+        els.usersTableContainer.innerHTML = `<div class="empty-state">Пользователи по текущим фильтрам не найдены.</div>`;
+        return;
+      }
+
+      els.usersTableContainer.innerHTML = `
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Пользователь</th>
+                <th>Роль</th>
+                <th>Группа</th>
+                <th>Код приглашения</th>
+                <th>Статус</th>
+                <th>Создан</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${state.users.map((user) => `
+                <tr>
+                  <td>
+                    <div class="person-cell">
+                      <div class="avatar">${escapeHtml(initials(user.full_name))}</div>
+                      <div class="person-meta">
+                        <strong>${escapeHtml(user.full_name)}</strong>
+                        <span class="person-secondary">tg_id: ${escapeHtml(user.tg_id)}</span>
+                      </div>
+                    </div>
+                  </td>
+                  <td>${roleBadge(user.role)}</td>
+                  <td>${escapeHtml(user.study_group || "—")}</td>
+                  <td>${user.registered_by_code ? badge(user.invite_role || "code", "blue") : badge("manual", "slate")}</td>
+                  <td>${user.is_banned ? badge("banned", "red") : badge("active", "green")}</td>
+                  <td>${escapeHtml(formatDate(user.created_at))}</td>
+                  <td>
+                    <div class="actions">
+                      <button class="button ${user.is_banned ? "success" : "danger"} js-toggle-ban" data-id="${user.tg_id}" data-next="${user.is_banned ? "false" : "true"}">
+                        ${user.is_banned ? "Разбан" : "Бан"}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+      `;
+
+      els.usersTableContainer.querySelectorAll(".js-toggle-ban").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const id = Number(button.dataset.id);
+          const next = button.dataset.next === "true";
+          try {
+            await apiFetch(apiUrl(`/api/users/${id}/ban`), {
+              method: "PATCH",
+              body: JSON.stringify({ is_banned: next }),
+            });
+            renderMessage(`Статус пользователя ${id} обновлён.`, "info");
+            await loadUsers();
+            await loadDashboard();
+          } catch (error) {
+            renderMessage(`Не удалось обновить статус пользователя: ${error.message}`, "error");
+          }
+        });
+      });
+    }
+
+    function renderReports() {
+      if (!state.reports.length) {
+        els.reportsCampaigns.innerHTML = `<div class="empty-state">Кампании для отчётов отсутствуют.</div>`;
+      } else {
+        els.reportsCampaigns.innerHTML = `<div class="report-grid">` + state.reports.map((campaign) => `
+          <div class="report-card">
+            <div class="report-top">
+              <div>${badge(campaign.completed ? "completed" : "in progress", campaign.completed ? "green" : "orange")}</div>
+              <div>
+                <button class="button ${state.selectedCampaignId === campaign.id ? "primary" : "secondary"} js-select-report" data-id="${campaign.id}">
+                  ${state.selectedCampaignId === campaign.id ? "Выбрано" : "Выбрать"}
+                </button>
+              </div>
+            </div>
+            <div class="report-title">${escapeHtml(campaign.title)}</div>
+            <div class="report-note">
+              ${escapeHtml(campaign.type)} · ${campaign.is_active ? "active" : "inactive"}
+            </div>
+
+            <div class="metrics-row">
+              <div class="metric-pill">
+                <div class="pill-label">Всего</div>
+                <div class="pill-value">${escapeHtml(campaign.submissions_total)}</div>
+              </div>
+              <div class="metric-pill">
+                <div class="pill-label">Загружено</div>
+                <div class="pill-value">${escapeHtml(campaign.uploaded_count)}</div>
+              </div>
+              <div class="metric-pill">
+                <div class="pill-label">На проверке</div>
+                <div class="pill-value">${escapeHtml(campaign.in_review_count)}</div>
+              </div>
+              <div class="metric-pill">
+                <div class="pill-label">Проверено</div>
+                <div class="pill-value">${escapeHtml(campaign.reviewed_count)}</div>
+              </div>
+            </div>
+
+            <div class="helper">Отклонено: ${escapeHtml(campaign.rejected_count)} · Средний балл: ${escapeHtml(campaign.average_score ?? "—")}</div>
+          </div>
+        `).join("") + `</div>`;
+
+        els.reportsCampaigns.querySelectorAll(".js-select-report").forEach((button) => {
+          button.addEventListener("click", () => {
+            state.selectedCampaignId = Number(button.dataset.id);
+            renderReports();
+            updateExportButtonState();
+          });
+        });
+      }
+
+      if (!state.exportFields.length) {
+        els.reportFields.innerHTML = `<div class="empty-state">Поля экспорта пока недоступны.</div>`;
+      } else {
+        els.reportFields.innerHTML = `<div class="stack">` + state.exportFields.map((field) => {
+          const active = state.selectedExportFields.has(field.key);
+          return `
+            <label class="checkbox-row">
+              <input type="checkbox" class="js-export-field" value="${escapeHtml(field.key)}" ${active ? "checked" : ""} />
+              <span>${escapeHtml(field.label)} <span class="muted">(${escapeHtml(field.key)})</span></span>
+            </label>
+          `;
+        }).join("") + `</div>`;
+
+        els.reportFields.querySelectorAll(".js-export-field").forEach((checkbox) => {
+          checkbox.addEventListener("change", () => {
+            if (checkbox.checked) {
+              state.selectedExportFields.add(checkbox.value);
+            } else {
+              state.selectedExportFields.delete(checkbox.value);
+            }
+          });
+        });
+      }
+
+      updateExportButtonState();
+    }
+
+    function updateExportButtonState() {
+      els.exportSelectedButton.disabled = !state.selectedCampaignId;
+    }
+
+    function resetCampaignForm() {
+      els.campaignId.value = "";
+      els.campaignForm.reset();
+      els.campaignMinScore.value = 0;
+      els.campaignMaxScore.value = 100;
+      els.campaignTtl.value = 1440;
+      els.campaignP2p.value = 3;
+      els.campaignActive.checked = true;
+      els.campaignSubmitButton.textContent = "Создать кампанию";
+    }
+
+    function fillCampaignForm(campaign) {
+      els.campaignId.value = campaign.id;
+      els.campaignTitle.value = campaign.title || "";
+      els.campaignType.value = campaign.type || CAMPAIGN_TYPE_OPTIONS[0].value;
+      els.campaignFormat.value = campaign.submission_format || SUBMISSION_FORMAT_OPTIONS[0].value;
+      els.campaignMinScore.value = campaign.min_score ?? 0;
+      els.campaignMaxScore.value = campaign.max_score ?? 100;
+      els.campaignTtl.value = campaign.ttl_minutes ?? 1440;
+      els.campaignP2p.value = campaign.p2p_reviews_required ?? 3;
+      els.campaignVotingType.value = campaign.voting_type || "";
+      els.campaignDeadline.value = campaign.campaign_deadline_at ? toDatetimeLocalValue(campaign.campaign_deadline_at) : "";
+      els.campaignExtensions.value = campaign.allowed_extensions || "";
+      els.campaignCriteria.value = campaign.criteria_text || "";
+      els.campaignAnon.checked = Boolean(campaign.is_expert_anon);
+      els.campaignBeforeResubmit.checked = Boolean(campaign.allow_resubmission_before_review);
+      els.campaignAfterResubmit.checked = Boolean(campaign.allow_resubmission_after_review);
+      els.campaignActive.checked = Boolean(campaign.is_active);
+      els.campaignSubmitButton.textContent = `Сохранить изменения #${campaign.id}`;
+      setPage("campaigns");
+    }
+
+    function toDatetimeLocalValue(value) {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "";
+      const pad = (num) => String(num).padStart(2, "0");
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    }
+
+    function campaignPayloadFromForm() {
+      return {
+        title: els.campaignTitle.value.trim(),
+        type: els.campaignType.value,
+        submission_format: els.campaignFormat.value,
+        min_score: Number(els.campaignMinScore.value || 0),
+        max_score: Number(els.campaignMaxScore.value || 0),
+        ttl_minutes: Number(els.campaignTtl.value || 1440),
+        p2p_reviews_required: Number(els.campaignP2p.value || 3),
+        voting_type: els.campaignVotingType.value.trim() || null,
+        campaign_deadline_at: els.campaignDeadline.value ? new Date(els.campaignDeadline.value).toISOString() : null,
+        allowed_extensions: els.campaignExtensions.value.trim() || null,
+        criteria_text: els.campaignCriteria.value.trim() || null,
+        is_expert_anon: els.campaignAnon.checked,
+        allow_resubmission_before_review: els.campaignBeforeResubmit.checked,
+        allow_resubmission_after_review: els.campaignAfterResubmit.checked,
+        is_active: els.campaignActive.checked,
+      };
+    }
+
+    async function loadHealth() {
+      state.health = await apiFetch(apiUrl("/health"));
+      els.statusApi.innerHTML = badge(state.health.status, "green");
+      els.statusDb.innerHTML = badge(state.health.database, "green");
+      els.statusTime.textContent = formatDate(state.health.timestamp);
+    }
+
+    async function loadDashboard() {
+      state.dashboard = await apiFetch(apiUrl("/api/dashboard"));
+      renderDashboard();
+    }
+
+    async function loadCampaigns() {
+      state.campaigns = await apiFetch(apiUrl("/api/campaigns"));
+      renderCampaigns();
+    }
+
+    async function loadUsers() {
+      const params = new URLSearchParams();
+      if (els.usersRoleFilter.value) params.set("role", els.usersRoleFilter.value);
+      if (els.usersGroupFilter.value.trim()) params.set("study_group", els.usersGroupFilter.value.trim());
+      if (els.usersBanFilter.value) params.set("is_banned", els.usersBanFilter.value);
+      if (els.usersSearchFilter.value.trim()) params.set("search", els.usersSearchFilter.value.trim());
+
+      state.users = await apiFetch(apiUrl(`/api/users${params.toString() ? `?${params.toString()}` : ""}`));
+      renderUsers();
+    }
+
+    async function loadReports() {
+      const payload = await apiFetch(apiUrl("/api/reports/campaigns"));
+      state.reports = payload.campaigns || [];
+      state.exportFields = payload.available_fields || [];
+      renderReports();
+    }
+
+    async function loadAll() {
+      renderMessage("");
+      try {
+        await Promise.all([
+          loadHealth(),
+          loadDashboard(),
+          loadCampaigns(),
+          loadUsers(),
+          loadReports(),
+        ]);
+      } catch (error) {
+        renderMessage(`Ошибка загрузки данных: ${error.message}`, "error");
+      }
+    }
+
+    async function handleCampaignSubmit(event) {
+      event.preventDefault();
+      renderMessage("");
+
+      try {
+        const payload = campaignPayloadFromForm();
+        const campaignId = els.campaignId.value;
+
+        if (!payload.title) {
+          throw new Error("Название кампании не может быть пустым");
+        }
+
+        if (campaignId) {
+          await apiFetch(apiUrl(`/api/campaigns/${campaignId}`), {
+            method: "PATCH",
+            body: JSON.stringify(payload),
+          });
+          renderMessage(`Кампания #${campaignId} успешно обновлена.`, "info");
+        } else {
+          await apiFetch(apiUrl("/api/campaigns"), {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+          renderMessage("Кампания успешно создана.", "info");
+        }
+
+        resetCampaignForm();
+        await loadCampaigns();
+        await loadDashboard();
+        await loadReports();
+      } catch (error) {
+        renderMessage(`Не удалось сохранить кампанию: ${error.message}`, "error");
+      }
+    }
+
+    async function handleExport() {
+      if (!state.selectedCampaignId) return;
+
+      const params = new URLSearchParams();
+      [...state.selectedExportFields].forEach((field) => params.append("fields", field));
+
+      const url = apiUrl(`/api/reports/campaigns/${state.selectedCampaignId}/export.xlsx${params.toString() ? `?${params.toString()}` : ""}`);
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+
+    function bindEvents() {
+      els.navItems.forEach((item) => {
+        item.addEventListener("click", () => setPage(item.dataset.page));
+      });
+
+      els.refreshButton.addEventListener("click", loadAll);
+
+      els.campaignForm.addEventListener("submit", handleCampaignSubmit);
+      els.campaignResetButton.addEventListener("click", () => {
+        resetCampaignForm();
+        renderMessage("");
+      });
+
+      els.usersApplyFilter.addEventListener("click", async () => {
+        try {
+          await loadUsers();
+        } catch (error) {
+          renderMessage(`Не удалось загрузить пользователей: ${error.message}`, "error");
+        }
+      });
+
+      els.usersSearchFilter.addEventListener("keydown", async (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          try {
+            await loadUsers();
+          } catch (error) {
+            renderMessage(`Не удалось загрузить пользователей: ${error.message}`, "error");
+          }
+        }
+      });
+
+      els.exportSelectedButton.addEventListener("click", handleExport);
+    }
+
+    populateStaticSelects();
+    bindEvents();
+    resetCampaignForm();
+    renderDashboard();
+    loadAll();
+  </script>
+</body>
+</html>

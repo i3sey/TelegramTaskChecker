@@ -1,5 +1,7 @@
 """User service for database operations."""
 
+import secrets
+
 from sqlalchemy import String, cast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +29,28 @@ class UserService:
             select(User).where(User.tg_id == tg_id)
         )
         return result.scalar_one_or_none()
+
+    @staticmethod
+    async def generate_unique_web_access_token(session: AsyncSession) -> str:
+        """Generate unique web access token for organizer web access."""
+        while True:
+            token = secrets.token_urlsafe(24)
+            result = await session.execute(
+                select(User.tg_id).where(User.web_access_token == token)
+            )
+            if result.scalar_one_or_none() is None:
+                return token
+
+    @staticmethod
+    async def ensure_web_access_token(user: User, session: AsyncSession) -> str:
+        """Ensure organizer has a web access token."""
+        if user.web_access_token:
+            return user.web_access_token
+
+        user.web_access_token = await UserService.generate_unique_web_access_token(session)
+        await session.flush()
+        logger.info(f"Generated web access token for user {user.tg_id}")
+        return user.web_access_token
 
     @staticmethod
     async def create_user(
@@ -63,6 +87,10 @@ class UserService:
         )
         session.add(user)
         await session.flush()
+
+        if role in {UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER}:
+            await UserService.ensure_web_access_token(user, session)
+
         logger.debug(f"Created user: {tg_id} with role {role}")
         return user
 
@@ -444,6 +472,10 @@ async def grant_campaign_access(
         session,
         invite_code,
     )
+
+async def ensure_web_access_token(user: User, session: AsyncSession) -> str:
+    """Ensure organizer has a web access token."""
+    return await UserService.ensure_web_access_token(user, session)
 
 async def has_campaign_access(
     tg_id: int,

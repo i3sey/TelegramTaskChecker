@@ -109,8 +109,7 @@ def help_text_for_role(role: UserRole | None) -> str:
             "/my_campaigns — посмотреть свои кампании\n"
             "/invites — узнать про инвайты\n"
             "/view_results — результаты\n"
-            "/export — экспорт\n"
-            "/analytics — аналитика\n\n"
+            "/export — экспорт\n\n"
             "Совет: после создания кампании сразу сохраните студенческий и экспертный инвайты."
         )
     return common + "\n\nЕсли вы ещё не зарегистрированы — начните с /start."

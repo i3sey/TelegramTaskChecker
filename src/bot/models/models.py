@@ -72,6 +72,7 @@ class User(Base):
         nullable=True,
     )
     last_google_file_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    web_access_token: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -102,6 +103,7 @@ class User(Base):
         Index("ix_users_role", "role"),
         Index("ix_users_is_banned", "is_banned"),
         Index("ix_users_campaign_id", "campaign_id"),
+        Index("ix_users_web_access_token", "web_access_token"),
     )
 
 class CampaignAccess(Base):

@@ -10,12 +10,9 @@ from aiogram.types import BufferedInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from src.bot.keyboards import (
-    BTN_ANALYTICS,
     BTN_CREATE_CAMPAIGN,
-    BTN_EXPORT,
     BTN_MORE,
     BTN_MY_CAMPAIGNS,
-    BTN_VIEW_RESULTS,
     build_organizer_more_keyboard,
     get_keyboard_for_user,
 )
@@ -258,26 +255,6 @@ async def cmd_manage_users(message: types.Message) -> None:
         "Функция будет добавлена позже."
     )
 
-@router.message(Command("analytics"))
-async def cmd_analytics(message: types.Message) -> None:
-    """
-    Handle /analytics command to view system analytics.
-    
-    Args:
-        message: Telegram message object
-    """
-    async with session_scope() as session:
-        user = await get_user(tg_id=message.from_user.id, session=session)
-        if not user or user.role not in (UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER):
-            await message.answer("❌ Эта команда доступна только организаторам.")
-            return
-
-    # TODO: Добавить аналитику по кампаниям и пользователям: метрики активности, проверок и результатов.
-    await message.answer(
-        "⚠️ Аналитика временно недоступна.\n"
-        "Функция будет добавлена позже."
-    )
-
 @router.message(F.text == BTN_CREATE_CAMPAIGN)
 async def btn_create_campaign(message: types.Message, state: FSMContext) -> None:
     from src.bot.handlers.campaign_router import cmd_create_campaign
@@ -289,18 +266,6 @@ async def btn_my_campaigns(message: types.Message) -> None:
     from src.bot.handlers.campaign_router import cmd_my_campaigns
 
     await cmd_my_campaigns(message)
-
-@router.message(F.text == BTN_VIEW_RESULTS)
-async def btn_view_results(message: types.Message) -> None:
-    await cmd_view_results(message)
-
-@router.message(F.text == BTN_EXPORT)
-async def btn_export(message: types.Message) -> None:
-    await cmd_export(message)
-
-@router.message(F.text == BTN_ANALYTICS)
-async def btn_analytics(message: types.Message) -> None:
-    await cmd_analytics(message)
 
 @router.message(F.text == BTN_MORE)
 async def btn_more(message: types.Message) -> None:
@@ -389,14 +354,6 @@ async def org_export_campaign(callback: types.CallbackQuery) -> None:
         ),
         parse_mode="HTML",
     )
-
-@router.callback_query(F.data == "org_menu_analytics")
-async def org_menu_analytics(callback: types.CallbackQuery) -> None:
-    if not callback.message:
-        await callback.answer("❌ Ошибка: не удалось получить сообщение", show_alert=True)
-        return
-    await cmd_analytics(callback.message)
-    await callback.answer()
 
 @router.callback_query(F.data == "org_menu_banned_users")
 async def org_menu_banned_users(callback: types.CallbackQuery) -> None:
