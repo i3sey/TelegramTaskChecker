@@ -1209,9 +1209,24 @@ async def process_anonymous_message(message: types.Message, state: FSMContext):
 @router.message(Command("campaigns"))
 async def cmd_campaigns(message: types.Message):
     """Handle /campaigns command - list active campaigns."""
-    logger.info(f"User {message.from_user.id} triggered /campaigns")
+    tg_id = message.from_user.id
+    logger.info(f"User {tg_id} triggered /campaigns")
 
     async with session_scope() as session:
+        user = await get_user(tg_id=tg_id, session=session)
+
+        if not user:
+            await message.answer(
+                "❌ Вы не зарегистрированы. Используйте /start для регистрации."
+            )
+            return
+
+        if user.role == UserRole.STUDENT:
+            await message.answer(
+                "❌ Студентам список всех кампаний недоступен. Используйте инвайт-ссылку или кнопку «📤 Загрузить работу» для сдачи в разрешённую кампанию."
+            )
+            return
+
         campaigns = await get_active_campaigns(session)
 
         if not campaigns:
@@ -1563,6 +1578,10 @@ async def cmd_submit(message: types.Message, state: FSMContext):
 
         # Get active campaigns
         campaigns = await get_active_campaigns(session)
+        if user.campaign_id is not None:
+            campaigns = [campaign for campaign in campaigns if campaign.id == user.campaign_id]
+        else:
+            campaigns = []
 
         if not campaigns:
             await message.answer(
@@ -1601,8 +1620,19 @@ async def process_campaign_selection(callback: types.CallbackQuery, state: FSMCo
         await callback.answer("❌ Ошибка выбора кампании", show_alert=True)
         return
 
-    # Verify campaign exists
+    # Verify campaign exists and user has access to it
     async with session_scope() as session:
+        user = await get_user(tg_id=callback.from_user.id, session=session)
+        if not user or user.role != UserRole.STUDENT:
+            await callback.answer("❌ Сдача работ доступна только студентам", show_alert=True)
+            return
+        if not user.registered_by_code or user.invite_role != "student":
+            await callback.answer("❌ Для сдачи работ нужен код доступа", show_alert=True)
+            return
+        if user.campaign_id is None or user.campaign_id != campaign_id:
+            await callback.answer("❌ У вас нет доступа к этой кампании", show_alert=True)
+            return
+
         campaign = await get_campaign(campaign_id, session)
 
         if not campaign:

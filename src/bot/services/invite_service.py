@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import secrets
+import string
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,9 +11,9 @@ from src.bot.utils.logging import logger
 
 
 def generate_invite_code(length: int = 10) -> str:
-    """Generate a short URL-safe invite code."""
-    # token_urlsafe returns roughly 1.3 chars per byte
-    return secrets.token_urlsafe(length)[:length]
+    """Generate a Telegram deep-link safe invite code."""
+    alphabet = string.ascii_letters + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
 async def create_invite(

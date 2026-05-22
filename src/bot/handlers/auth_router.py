@@ -105,6 +105,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
             invite = await get_invite_by_code(payload, session)
         invite_ok = is_invite_valid(invite)
         invite_role = invite.role if invite_ok else None
+        invite_campaign_id = invite.campaign_id if invite_ok else None
 
         existing_user = await get_user(tg_id=tg_id, session=session)
 
@@ -126,6 +127,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
                 await mark_invite_used(invite, session)
                 existing_user.registered_by_code = True
                 existing_user.invite_role = invite_role
+                existing_user.campaign_id = invite_campaign_id
 
                 if invite_role == "student":
                     await message.answer(
@@ -150,15 +152,26 @@ async def cmd_start(message: types.Message, state: FSMContext):
                     "Без кода вы сможете войти в бота, но некоторые действия для выбранной роли будут недоступны."
                 )
 
+            commands_text = (
+                "Доступные команды:\n"
+                "👤 /profile - Профиль\n"
+                "🎭 /role - Изменить роль\n"
+                "❓ /help - Помощь"
+            )
+            if existing_user.role != UserRole.STUDENT:
+                commands_text = (
+                    "Доступные команды:\n"
+                    "📋 /campaigns - Активные кампании\n"
+                    "👤 /profile - Профиль\n"
+                    "🎭 /role - Изменить роль\n"
+                    "❓ /help - Помощь"
+                )
+
             await message.answer(
                 f"👋 <b>Добро пожаловать, {existing_user.full_name}!</b>\n\n"
                 f"Вы успешно авторизованы как <b>{_role_label(existing_user.role)}</b>.\n"
                 f"Группа: <b>{existing_user.study_group}</b>\n\n"
-                "Доступные команды:\n"
-                "📋 /campaigns - Мои кампании\n"
-                "👤 /profile - Профиль\n"
-                "🎭 /role - Изменить роль\n"
-                "❓ /help - Помощь"
+                f"{commands_text}"
                 f"{extra_notice}",
                 parse_mode="HTML",
                 reply_markup=await get_keyboard_for_user(existing_user),
@@ -169,6 +182,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
                 invite_role=invite_role,
                 invite_ok=invite_ok,
                 invite_code=payload,
+                invite_campaign_id=invite_campaign_id,
             )
             if invite_ok:
                 role = UserRole.STUDENT if invite_role == "student" else UserRole.EXPERT
@@ -266,6 +280,7 @@ async def reg_confirm_full_name(callback: types.CallbackQuery, state: FSMContext
     invite_ok = data.get("invite_ok", False)
     invite_role = data.get("invite_role")
     invite_code = data.get("invite_code")
+    invite_campaign_id = data.get("invite_campaign_id")
 
     if not full_name or role is None:
         await callback.message.answer(
@@ -299,6 +314,7 @@ async def reg_confirm_full_name(callback: types.CallbackQuery, state: FSMContext
                 role=role,
                 registered_by_code=invite_ok if _role_requires_invite(role) else False,
                 invite_role=invite_role if _role_requires_invite(role) else None,
+                campaign_id=invite_campaign_id if invite_ok else None,
             )
             if invite_ok and invite and _role_requires_invite(role):
                 await mark_invite_used(invite, session)
@@ -353,6 +369,7 @@ async def process_study_group(message: types.Message, state: FSMContext):
     invite_ok = data.get("invite_ok", False)
     invite_role = data.get("invite_role")
     invite_code = data.get("invite_code")
+    invite_campaign_id = data.get("invite_campaign_id")
 
     tg_id = message.from_user.id
 
@@ -379,6 +396,7 @@ async def process_study_group(message: types.Message, state: FSMContext):
                 role=UserRole.STUDENT,
                 registered_by_code=invite_ok,
                 invite_role=invite_role,
+                campaign_id=invite_campaign_id if invite_ok else None,
             )
             if invite_ok and invite:
                 await mark_invite_used(invite, session)

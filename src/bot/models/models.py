@@ -65,6 +65,11 @@ class User(Base):
         nullable=False,
     )
     invite_role: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    campaign_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("campaigns.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     last_google_file_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -90,6 +95,7 @@ class User(Base):
     __table_args__ = (
         Index("ix_users_role", "role"),
         Index("ix_users_is_banned", "is_banned"),
+        Index("ix_users_campaign_id", "campaign_id"),
     )
 
 class InviteCode(Base):

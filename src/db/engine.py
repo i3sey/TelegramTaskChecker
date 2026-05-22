@@ -56,6 +56,18 @@ async def _ensure_schema(conn) -> None:
     await conn.execute(
         text(
             "ALTER TABLE users "
+            "ADD COLUMN IF NOT EXISTS campaign_id INTEGER"
+        )
+    )
+    await conn.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_users_campaign_id "
+            "ON users (campaign_id)"
+        )
+    )
+    await conn.execute(
+        text(
+            "ALTER TABLE users "
             "ADD COLUMN IF NOT EXISTS last_google_file_id VARCHAR(255)"
         )
     )

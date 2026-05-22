@@ -280,7 +280,7 @@ def _get_student_keyboard(show_p2p_review: bool = False) -> ReplyKeyboardMarkup:
     if show_p2p_review:
         rows.append([BTN_P2P_REVIEW])
 
-    rows.append([BTN_CAMPAIGNS, BTN_PROFILE, BTN_ROLE, BTN_HELP])
+    rows.append([BTN_PROFILE, BTN_ROLE, BTN_HELP])
     return _mk_markup(rows)
 
 async def student_has_pending_p2p_reviews(user: User) -> bool:

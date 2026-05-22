@@ -37,6 +37,7 @@ class UserService:
         role: UserRole = UserRole.STUDENT,
         registered_by_code: bool = False,
         invite_role: str | None = None,
+        campaign_id: int | None = None,
     ) -> User:
         """
         Create a new user.
@@ -58,6 +59,7 @@ class UserService:
             role=role,
             registered_by_code=registered_by_code,
             invite_role=invite_role,
+            campaign_id=campaign_id,
         )
         session.add(user)
         await session.flush()
@@ -257,10 +259,18 @@ async def create_user(
     role: UserRole = UserRole.STUDENT,
     registered_by_code: bool = False,
     invite_role: str | None = None,
+    campaign_id: int | None = None,
 ) -> User:
     """Create a new user."""
     return await UserService.create_user(
-        tg_id, full_name, study_group, session, role, registered_by_code, invite_role
+        tg_id,
+        full_name,
+        study_group,
+        session,
+        role,
+        registered_by_code,
+        invite_role,
+        campaign_id,
     )
 
 async def update_user_role(
