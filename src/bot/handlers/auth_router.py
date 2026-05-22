@@ -113,8 +113,8 @@ def _build_organizer_web_message(token: str) -> str:
         )
 
     return (
-        "\n\n🌐 <b>Ваш персональный фронтенд:</b>\n"
-        f"<code>{web_url}</code>\n\n"
+        "\n\n🌐 <b>Ваша персональная панель организатора:</b>\n"
+        f"{web_url}"
     )
 
 # Command handlers

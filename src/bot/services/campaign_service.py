@@ -326,19 +326,18 @@ class CampaignService:
     @staticmethod
     async def get_completed_campaigns_for_export(session: AsyncSession) -> list[Campaign]:
         """
-        Get completed campaigns available for export.
+        Get campaigns available for export.
 
         Args:
             session: Database session
 
         Returns:
-            List of completed Campaign objects
+            List of Campaign objects ordered by creation date descending
         """
         await CampaignService._deactivate_expired_campaigns(session)
         result = await session.execute(
             select(Campaign)
-            .where(Campaign.is_active == False)
-            .order_by(Campaign.created_at.desc())
+            .order_by(Campaign.is_active.desc(), Campaign.created_at.desc())
         )
         return list(result.scalars().all())
 
@@ -357,18 +356,12 @@ class CampaignService:
         Returns:
             Tuple of campaign object and list of export row dictionaries.
             If campaign is not found, returns (None, []).
-
-        Raises:
-            ValueError: If campaign is still active.
         """
         await CampaignService._deactivate_expired_campaigns(session)
 
         campaign = await CampaignService.get_campaign(campaign_id, session)
         if campaign is None:
             return None, []
-
-        if campaign.is_active:
-            raise ValueError("Campaign is still active and cannot be exported")
 
         reviewer = aliased(User)
 

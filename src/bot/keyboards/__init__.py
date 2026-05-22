@@ -33,15 +33,15 @@ BTN_VIEW_RESULTS = "🔎 Результаты"
 BTN_EXPORT = "📤 Экспорт"
 BTN_MORE = "⋯ Ещё"
 
-BTN_HOURS_12 = "12 часов"
-BTN_HOURS_24 = "24 часа"
-BTN_HOURS_48 = "48 часов"
-BTN_HOURS_72 = "72 часа"
+BTN_MINUTES_15 = "15 минут"
+BTN_MINUTES_40 = "40 минут"
+BTN_HOUR_1 = "1 час"
 BTN_SCORE_0 = "0"
-BTN_SCORE_50 = "50"
+BTN_SCORE_5 = "5"
+BTN_SCORE_10 = "10"
+BTN_SCORE_40 = "40"
+BTN_SCORE_60 = "60"
 BTN_SCORE_100 = "100"
-BTN_SCORE_200 = "200"
-BTN_SCORE_500 = "500"
 BTN_ANON_YES = "✅ Да"
 BTN_ANON_NO = "❌ Нет"
 
@@ -61,15 +61,15 @@ def build_campaign_title_keyboard() -> ReplyKeyboardMarkup:
 def build_campaign_min_score_keyboard() -> ReplyKeyboardMarkup:
     return _mk_markup(
         [
-            [BTN_SCORE_0, BTN_SCORE_50, BTN_SCORE_100],
-            [BTN_SCORE_200, BTN_PROFILE, BTN_ROLE, BTN_HELP],
+            [BTN_SCORE_0, BTN_SCORE_10, BTN_SCORE_40],
+            [BTN_PROFILE, BTN_ROLE, BTN_HELP],
         ]
     )
 
 def build_campaign_max_score_keyboard() -> ReplyKeyboardMarkup:
     return _mk_markup(
         [
-            [BTN_SCORE_100, BTN_SCORE_200, BTN_SCORE_500],
+            [BTN_SCORE_5, BTN_SCORE_60, BTN_SCORE_100],
             [BTN_PROFILE, BTN_ROLE, BTN_HELP],
         ]
     )
@@ -77,7 +77,7 @@ def build_campaign_max_score_keyboard() -> ReplyKeyboardMarkup:
 def build_campaign_ttl_keyboard() -> ReplyKeyboardMarkup:
     return _mk_markup(
         [
-            [BTN_HOURS_12, BTN_HOURS_24, BTN_HOURS_48, BTN_HOURS_72],
+            [BTN_MINUTES_15, BTN_MINUTES_40, BTN_HOUR_1],
             [BTN_PROFILE, BTN_ROLE, BTN_HELP],
         ]
     )
@@ -136,7 +136,7 @@ def build_submission_confirmation_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(text="✅ Отправить", callback_data="submission_confirm"),
-                InlineKeyboardButton(text="✏️ Отменить и отправить заново", callback_data="submission_retry"),
+                InlineKeyboardButton(text="✏️ Редактировать", callback_data="submission_retry"),
             ]
         ]
     )

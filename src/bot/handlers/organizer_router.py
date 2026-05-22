@@ -125,12 +125,13 @@ def _build_export_rows(rows: list[dict[str, Any]]) -> list[list[Any]]:
     return export_rows
 
 def _build_completed_campaigns_export_keyboard(campaigns: list[Any]) -> types.InlineKeyboardMarkup:
-    """Build inline keyboard for completed campaigns export."""
+    """Build inline keyboard for campaigns export."""
     builder = InlineKeyboardBuilder()
 
     for campaign in campaigns:
+        status_icon = "✅" if not campaign.is_active else "⚠️"
         builder.button(
-            text=f"#{campaign.id} · {campaign.title[:40]}",
+            text=f"{status_icon} #{campaign.id} · {campaign.title[:40]}",
             callback_data=f"org_export_campaign_{campaign.id}",
         )
 
@@ -215,7 +216,7 @@ async def cmd_view_results(message: types.Message) -> None:
 
 @router.message(Command("export"))
 async def cmd_export(message: types.Message) -> None:
-    """Show completed campaigns available for XLSX export."""
+    """Show campaigns available for XLSX export."""
     async with session_scope() as session:
         user = await get_user(tg_id=message.from_user.id, session=session)
         if not user or user.role not in (UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER):
@@ -225,12 +226,14 @@ async def cmd_export(message: types.Message) -> None:
         campaigns = await get_completed_campaigns_for_export(session)
 
     if not campaigns:
-        await message.answer("📭 Нет завершённых кампаний для экспорта.")
+        await message.answer("📭 Нет кампаний для экспорта.")
         return
 
     await message.answer(
         "📤 <b>Экспорт в XLSX</b>\n\n"
-        "Выберите завершённую кампанию для выгрузки:",
+        "Выберите кампанию для выгрузки.\n"
+        "✅ — завершённая кампания\n"
+        "⚠️ — кампания ещё не завершена, экспорт будет выполнен с предупреждением.",
         parse_mode="HTML",
         reply_markup=_build_completed_campaigns_export_keyboard(campaigns),
     )
@@ -277,18 +280,48 @@ async def btn_more(message: types.Message) -> None:
 
 @router.callback_query(F.data == "org_menu_view_results")
 async def org_menu_view_results(callback: types.CallbackQuery) -> None:
-    if not callback.message:
+    if not callback.message or not callback.from_user:
         await callback.answer("❌ Ошибка: не удалось получить сообщение", show_alert=True)
         return
-    await cmd_view_results(callback.message)
+
+    async with session_scope() as session:
+        user = await get_user(tg_id=callback.from_user.id, session=session)
+        if not user or user.role not in (UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER):
+            await callback.answer("❌ Доступ запрещен", show_alert=True)
+            return
+
+        results = await get_campaign_results(session)
+
+    await callback.message.answer(_format_results_text(results), parse_mode="HTML")
     await callback.answer()
 
 @router.callback_query(F.data == "org_menu_export")
 async def org_menu_export(callback: types.CallbackQuery) -> None:
-    if not callback.message:
+    if not callback.message or not callback.from_user:
         await callback.answer("❌ Ошибка: не удалось получить сообщение", show_alert=True)
         return
-    await cmd_export(callback.message)
+
+    async with session_scope() as session:
+        user = await get_user(tg_id=callback.from_user.id, session=session)
+        if not user or user.role not in (UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER):
+            await callback.answer("❌ Доступ запрещен", show_alert=True)
+            return
+
+        campaigns = await get_completed_campaigns_for_export(session)
+
+    if not campaigns:
+        await callback.message.answer("📭 Нет кампаний для экспорта.")
+        await callback.answer()
+        return
+
+    await callback.message.answer(
+        "📤 <b>Экспорт в XLSX</b>\n\n"
+        "Выберите кампанию для выгрузки.\n"
+        "✅ — завершённая кампания\n"
+        "⚠️ — кампания ещё не завершена, экспорт будет выполнен с предупреждением.",
+        parse_mode="HTML",
+        reply_markup=_build_completed_campaigns_export_keyboard(campaigns),
+    )
     await callback.answer()
 
 @router.callback_query(F.data.startswith("org_export_campaign_"))
@@ -311,17 +344,21 @@ async def org_export_campaign(callback: types.CallbackQuery) -> None:
             await callback.answer("❌ Доступ запрещен", show_alert=True)
             return
 
-        try:
-            campaign, export_rows = await get_campaign_export_rows(campaign_id, session)
-        except ValueError:
-            await callback.answer("⚠️ Можно экспортировать только завершённые кампании", show_alert=True)
-            return
+        campaign, export_rows = await get_campaign_export_rows(campaign_id, session)
 
         if campaign is None:
             await callback.answer("❌ Кампания не найдена", show_alert=True)
             return
 
-    await callback.answer("⏳ Готовлю XLSX...")
+        is_active_campaign = campaign.is_active
+
+    if is_active_campaign:
+        await callback.answer(
+            "⚠️ Кампания ещё не завершена. Экспорт сформирован по текущим данным.",
+            show_alert=True,
+        )
+    else:
+        await callback.answer("⏳ Готовлю XLSX...")
 
     try:
         export_header = _build_export_headers(export_rows)
@@ -344,6 +381,12 @@ async def org_export_campaign(callback: types.CallbackQuery) -> None:
         )
         return
 
+    warning_text = (
+        "\n⚠️ <b>Внимание:</b> кампания ещё не завершена, файл содержит промежуточные результаты."
+        if campaign.is_active
+        else ""
+    )
+
     await callback.message.answer_document(
         document=export_file,
         caption=(
@@ -351,6 +394,7 @@ async def org_export_campaign(callback: types.CallbackQuery) -> None:
             f"Кампания: <b>{escape(campaign.title)}</b>\n"
             f"ID кампании: <code>{campaign.id}</code>\n"
             f"Выгружено строк: <b>{written_rows}</b>"
+            f"{warning_text}"
         ),
         parse_mode="HTML",
     )

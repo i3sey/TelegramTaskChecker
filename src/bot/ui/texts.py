@@ -151,5 +151,4 @@ def profile_text(user) -> str:
         f"🎓 Группа: <b>{user.study_group or 'Не указана'}</b>\n"
         f"🎭 Роль: <b>{role_label(user.role)}</b>\n"
         f"📌 Статус аккаунта: {'✅ Активен' if not user.is_banned else '⛔ Заблокирован'}\n"
-        f"🔐 Доступ к функциям роли: {access}"
     )

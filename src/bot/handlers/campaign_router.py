@@ -40,15 +40,15 @@ from src.bot.keyboards import (
     BTN_CREATE_CAMPAIGN,
     BTN_VIEW_RESULTS,
     BTN_EXPORT,
-    BTN_HOURS_12,
-    BTN_HOURS_24,
-    BTN_HOURS_48,
-    BTN_HOURS_72,
+    BTN_MINUTES_15,
+    BTN_MINUTES_40,
+    BTN_HOUR_1,
     BTN_SCORE_0,
-    BTN_SCORE_50,
+    BTN_SCORE_5,
+    BTN_SCORE_10,
+    BTN_SCORE_40,
+    BTN_SCORE_60,
     BTN_SCORE_100,
-    BTN_SCORE_200,
-    BTN_SCORE_500,
     BTN_ANON_YES,
     BTN_ANON_NO,
     build_campaign_anonymous_keyboard,
@@ -127,9 +127,12 @@ async def _create_campaign_invites(
     return student_invite.code, expert_invite.code
 
 
+def _build_invite_link(bot_username: str, invite_code: str) -> str:
+    return f"https://t.me/{bot_username}?start={invite_code}"
+
 def _format_invite_block(bot_username: str, student_code: str, expert_code: str) -> str:
-    student_link = f"https://t.me/{bot_username}?start={student_code}"
-    expert_link = f"https://t.me/{bot_username}?start={expert_code}"
+    student_link = _build_invite_link(bot_username, student_code)
+    expert_link = _build_invite_link(bot_username, expert_code)
     return (
         "\n\n🔗 <b>Инвайты кампании:</b>\n"
         f"🎓 Студент: {student_link}\n"
@@ -306,21 +309,19 @@ def _submission_confirmation_text(campaign: Campaign, payload: dict) -> str:
 
 def _build_min_score_keyboard():
     return _build_inline_keyboard([
-        [("0", "cam_min_0"), ("50", "cam_min_50"), ("100", "cam_min_100")],
-        [("200", "cam_min_200")],
+        [("0", "cam_min_0"), ("10", "cam_min_10"), ("40", "cam_min_40")],
     ])
 
 
 def _build_max_score_keyboard():
     return _build_inline_keyboard([
-        [("100", "cam_max_100"), ("200", "cam_max_200"), ("500", "cam_max_500")],
+        [("5", "cam_max_5"), ("60", "cam_max_60"), ("100", "cam_max_100")],
     ])
 
 
 def _build_ttl_keyboard():
     return _build_inline_keyboard([
-        [("12 часов", "cam_ttl_720"), ("24 часа", "cam_ttl_1440")],
-        [("48 часов", "cam_ttl_2880"), ("72 часа", "cam_ttl_4320")],
+        [("15 минут", "cam_ttl_15"), ("40 минут", "cam_ttl_40"), ("1 час", "cam_ttl_60")],
     ])
 
 
@@ -738,7 +739,7 @@ async def process_min_score(message: types.Message, state: FSMContext):
     """Process minimum score input."""
     min_score = _parse_choice(
         message.text,
-        mapping={BTN_SCORE_0: 0, BTN_SCORE_50: 50, BTN_SCORE_100: 100, BTN_SCORE_200: 200},
+        mapping={BTN_SCORE_0: 0, BTN_SCORE_10: 10, BTN_SCORE_40: 40},
     )
     if min_score is None or min_score < 0:
         await message.answer(
@@ -784,7 +785,8 @@ async def process_campaign_max_score_callback(callback: types.CallbackQuery, sta
     logger.debug(f"Max score selected: {max_score}")
 
     await callback.message.edit_text(
-        "⏱ <b>Введите время на проверку (в минутах):</b>\n"
+        "⏱ <b>Введите время на проверку работы экспертом (в минутах):</b>\n"
+        "Это время, в течение которого эксперт должен проверить работу, иначе она вернётся в очередь.\n"
         "Можно нажать кнопку под сообщением или ввести число минут вручную.",
         reply_markup=_build_ttl_keyboard(),
         parse_mode="HTML",
@@ -798,7 +800,7 @@ async def process_max_score(message: types.Message, state: FSMContext):
     """Process maximum score input."""
     max_score = _parse_choice(
         message.text,
-        mapping={BTN_SCORE_100: 100, BTN_SCORE_200: 200, BTN_SCORE_500: 500},
+        mapping={BTN_SCORE_5: 5, BTN_SCORE_60: 60, BTN_SCORE_100: 100},
     )
     if max_score is None or max_score < 0:
         await message.answer(
@@ -820,7 +822,8 @@ async def process_max_score(message: types.Message, state: FSMContext):
     logger.debug(f"Max score entered: {max_score}")
 
     await message.answer(
-        "⏱ <b>Введите время на проверку (в минутах):</b>\n"
+        "⏱ <b>Введите время на проверку работы экспертом (в минутах):</b>\n"
+        "Это время, в течение которого эксперт должен проверить работу, иначе она вернётся в очередь.\n"
         "Можно нажать кнопку под сообщением или ввести число минут вручную.",
         reply_markup=_build_ttl_keyboard(),
         parse_mode="HTML",
@@ -857,7 +860,7 @@ async def process_ttl(message: types.Message, state: FSMContext):
     """Process TTL input."""
     ttl_minutes = _parse_choice(
         message.text,
-        mapping={BTN_HOURS_12: 720, BTN_HOURS_24: 1440, BTN_HOURS_48: 2880, BTN_HOURS_72: 4320},
+        mapping={BTN_MINUTES_15: 15, BTN_MINUTES_40: 40, BTN_HOUR_1: 60},
     )
     if ttl_minutes is None or ttl_minutes <= 0:
         await message.answer(
@@ -1413,9 +1416,11 @@ async def cmd_my_campaigns(message: types.Message):
             for campaign in campaigns:
                 if campaign.id in invites_by_campaign:
                     text += f"\n<b>{campaign.title}</b>:\n"
+                    bot_username = (await message.bot.get_me()).username
                     for invite in invites_by_campaign[campaign.id]:
                         used_text = f" ({invite.uses}" + (f"/{invite.max_uses}" if invite.max_uses else "") + ")"
-                        text += f"   <code>{invite.code}</code>{used_text}\n"
+                        invite_link = _build_invite_link(bot_username, invite.code)
+                        text += f"   {invite_link}{used_text}\n"
 
 
         await message.answer(
