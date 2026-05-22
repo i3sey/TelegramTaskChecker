@@ -19,6 +19,29 @@ export REDIS_HOST REDIS_PORT REDIS_DB REDIS_PASSWORD
 POSTGRES_STARTED=0
 REDIS_STARTED=0
 
+find_pg_bin() {
+  binary_name="$1"
+
+  if command -v "$binary_name" >/dev/null 2>&1; then
+    command -v "$binary_name"
+    return 0
+  fi
+
+  for candidate in /usr/lib/postgresql/*/bin/"$binary_name"; do
+    if [ -x "$candidate" ]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+
+  echo "$binary_name"
+}
+
+INITDB_BIN="$(find_pg_bin initdb)"
+PG_CTL_BIN="$(find_pg_bin pg_ctl)"
+PSQL_BIN="$(find_pg_bin psql)"
+CREATEDB_BIN="$(find_pg_bin createdb)"
+
 is_local_host() {
   case "$1" in
     localhost|127.0.0.1)
@@ -32,7 +55,7 @@ is_local_host() {
 
 wait_for_postgres() {
   attempts=0
-  until PGPASSWORD="$POSTGRES_PASSWORD" psql \
+  until PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
     -h "$POSTGRES_HOST" \
     -p "$POSTGRES_PORT" \
     -U "$POSTGRES_USER" \
@@ -79,12 +102,12 @@ start_local_postgres() {
     PASSWORD_FILE="$(mktemp)"
     trap 'rm -f "$PASSWORD_FILE"' EXIT
     printf "%s" "$POSTGRES_PASSWORD" > "$PASSWORD_FILE"
-    gosu postgres initdb -D "$PGDATA" --username="$POSTGRES_USER" --pwfile="$PASSWORD_FILE" >/dev/null
+    gosu postgres "$INITDB_BIN" -D "$PGDATA" --username="$POSTGRES_USER" --pwfile="$PASSWORD_FILE" >/dev/null
     rm -f "$PASSWORD_FILE"
     trap - EXIT
   fi
 
-  gosu postgres pg_ctl \
+  gosu postgres "$PG_CTL_BIN" \
     -D "$PGDATA" \
     -l /var/log/postgresql/postgresql.log \
     -o "-c listen_addresses=127.0.0.1 -p $POSTGRES_PORT" \
@@ -92,8 +115,8 @@ start_local_postgres() {
 
   POSTGRES_STARTED=1
 
-  if ! gosu postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname = '$POSTGRES_DB'" postgres | grep -q 1; then
-    gosu postgres createdb -O "$POSTGRES_USER" "$POSTGRES_DB"
+  if ! gosu postgres "$PSQL_BIN" -tAc "SELECT 1 FROM pg_database WHERE datname = '$POSTGRES_DB'" postgres | grep -q 1; then
+    gosu postgres "$CREATEDB_BIN" -O "$POSTGRES_USER" "$POSTGRES_DB"
   fi
 }
 
@@ -120,7 +143,7 @@ start_local_redis() {
 
 cleanup() {
   if [ "$POSTGRES_STARTED" -eq 1 ]; then
-    gosu postgres pg_ctl -D "$PGDATA" -m fast stop >/dev/null 2>&1 || true
+    gosu postgres "$PG_CTL_BIN" -D "$PGDATA" -m fast stop >/dev/null 2>&1 || true
   fi
 
   if [ "$REDIS_STARTED" -eq 1 ]; then
