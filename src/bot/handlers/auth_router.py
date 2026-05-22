@@ -509,10 +509,6 @@ async def reg_confirm_study_group(callback: types.CallbackQuery, state: FSMConte
             parse_mode="HTML",
             reply_markup=await get_keyboard_for_user(user),
         )
-        if invite_ok:
-            from src.bot.handlers.campaign_router import cmd_submit
-
-            await cmd_submit(callback.message, state)
 
     except Exception as e:
         logger.error(f"Failed to create user {tg_id}: {e}")
