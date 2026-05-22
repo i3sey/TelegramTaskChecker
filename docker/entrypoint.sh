@@ -180,15 +180,31 @@ fi
 wait_for_postgres
 wait_for_redis
 
-APP_MODE="${APP_MODE:-bot}"
+APP_MODE="${APP_MODE:-all}"
+WEB_PORT="${PORT:-8000}"
 
 trap cleanup EXIT INT TERM
 
-if [ "$APP_MODE" = "web" ]; then
-  python -m uvicorn src.web.app:app --host 0.0.0.0 --port 8000 &
-else
-  python -m src.bot.main &
+BOT_PID=""
+WEB_PID=""
+
+if [ "$APP_MODE" = "web" ] || [ "$APP_MODE" = "all" ]; then
+  python -m uvicorn src.web.app:app --host 0.0.0.0 --port "$WEB_PORT" &
+  WEB_PID=$!
 fi
 
-APP_PID=$!
-wait "$APP_PID"
+if [ "$APP_MODE" = "bot" ] || [ "$APP_MODE" = "all" ]; then
+  python -m src.bot.main &
+  BOT_PID=$!
+fi
+
+if [ -n "$WEB_PID" ] && [ -n "$BOT_PID" ]; then
+  wait "$WEB_PID" "$BOT_PID"
+elif [ -n "$WEB_PID" ]; then
+  wait "$WEB_PID"
+elif [ -n "$BOT_PID" ]; then
+  wait "$BOT_PID"
+else
+  echo "Nothing to run: APP_MODE must be one of bot, web, all" >&2
+  exit 1
+fi
