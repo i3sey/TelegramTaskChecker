@@ -183,6 +183,16 @@ def _build_submission_format_keyboard():
         [("🔗 Ссылка", "subfmt_link")],
     ])
 
+def _build_criteria_skip_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(
+            text="⏭️ Пропустить",
+            callback_data="campaign_skip_criteria",
+        )
+    )
+    return builder.as_markup()
+
 def _submission_prompt_text(campaign: Campaign) -> str:
     prompts = {
         SubmissionFormat.DOCUMENT: (
@@ -980,15 +990,15 @@ async def process_allow_resubmission_after_review_callback(
         allow_resubmission_after_review=allow_resubmission_after_review
     )
 
-    await callback.message.edit_text(
+    await callback.message.answer(
         "🧾 <b>Введите критерии оценки (необязательно):</b>\n"
         "Один критерий — одна строка.\n\n"
         "Пример:\n"
         "Оформление\n"
         "Аргументация\n"
-        "Полнота ответа\n\n"
-        "Если критерии не нужны, отправьте сообщение <code>Пропустить</code>.",
+        "Полнота ответа",
         parse_mode="HTML",
+        reply_markup=_build_criteria_skip_keyboard(),
     )
     await state.set_state(CampaignCreationStates.waiting_for_criteria)
     await callback.answer()
@@ -1003,24 +1013,39 @@ async def process_allow_resubmission_after_review_message(message: types.Message
         parse_mode="HTML",
     )
 
+@router.callback_query(
+    StateFilter(CampaignCreationStates.waiting_for_criteria),
+    F.data == "campaign_skip_criteria",
+)
+async def process_campaign_criteria_skip(callback: types.CallbackQuery, state: FSMContext):
+    await state.update_data(criteria_text=None, criteria_count=0)
+    if callback.message:
+        await callback.message.answer(
+            "🔒 <b>Сделать рецензии анонимными?</b>\n"
+            "Если выбрать «Да», автор не увидит имя проверяющего.",
+            reply_markup=_build_anonymous_keyboard(),
+            parse_mode="HTML",
+        )
+    await state.set_state(CampaignCreationStates.waiting_for_anonymous)
+    await callback.answer()
+
 @router.message(StateFilter(CampaignCreationStates.waiting_for_criteria))
 async def process_campaign_criteria(message: types.Message, state: FSMContext):
     criteria_input = (message.text or "").strip()
-    if criteria_input.lower() in {"пропустить", "skip", "-", "нет"}:
-        await state.update_data(criteria_text=None, criteria_count=0)
-    else:
-        criteria = _parse_criteria_lines(criteria_input)
-        if not criteria:
-            await message.answer(
-                "❌ Введите хотя бы один непустой критерий в отдельных строках "
-                "или отправьте <code>Пропустить</code>.",
-                parse_mode="HTML",
-            )
-            return
-        await state.update_data(
-            criteria_text=CampaignService.serialize_criteria(criteria),
-            criteria_count=len(criteria),
+    criteria = _parse_criteria_lines(criteria_input)
+    if not criteria:
+        await message.answer(
+            "❌ Введите хотя бы один непустой критерий в отдельных строках "
+            "или нажмите кнопку «Пропустить».",
+            parse_mode="HTML",
+            reply_markup=_build_criteria_skip_keyboard(),
         )
+        return
+
+    await state.update_data(
+        criteria_text=CampaignService.serialize_criteria(criteria),
+        criteria_count=len(criteria),
+    )
 
     await message.answer(
         "🔒 <b>Сделать рецензии анонимными?</b>\n"
