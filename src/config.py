@@ -5,7 +5,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-env_path = Path(__file__).parent.parent.parent / ".env"
+env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(env_path)
 
 @dataclass
@@ -44,6 +44,12 @@ class Config:
 
 def _get_database_url() -> str:
     """Build database URL from environment variables."""
+    direct_url = os.getenv("DATABASE_URL")
+    if direct_url:
+        if direct_url.startswith("postgresql://"):
+            return direct_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return direct_url
+
     user = os.getenv("POSTGRES_USER", "postgres")
     password = os.getenv("POSTGRES_PASSWORD", "postgres")
     host = os.getenv("POSTGRES_HOST", "localhost")
@@ -54,6 +60,10 @@ def _get_database_url() -> str:
 
 def _get_redis_url() -> str:
     """Build Redis URL from environment variables."""
+    direct_url = os.getenv("REDIS_URL")
+    if direct_url:
+        return direct_url
+
     host = os.getenv("REDIS_HOST", "localhost")
     port = os.getenv("REDIS_PORT", "6379")
     db = os.getenv("REDIS_DB", "0")

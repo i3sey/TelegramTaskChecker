@@ -28,9 +28,20 @@ This starts:
 - `postgres`
 - `redis`
 
-Inside Docker, the bot automatically connects to:
+Inside Docker Compose, the bot automatically connects to:
 - PostgreSQL at `postgres:5432`
 - Redis at `redis:6379`
+
+You can configure connections in two ways:
+- with `POSTGRES_*` and `REDIS_*` variables
+- or with direct `DATABASE_URL` and `REDIS_URL`
+
+Example:
+
+```text
+DATABASE_URL=postgresql://postgres:postgres@postgres:5432/telegram_task_checker
+REDIS_URL=redis://redis:6379/0
+```
 
 ## Docker image build on GitHub
 
@@ -61,7 +72,7 @@ ghcr.io/i3sey/telegramtaskchecker:latest
 
 ## Deploy on a container platform
 
-If your platform can run a long-lived worker/container process, point it to the published image from GHCR and provide environment variables from `.env`.
+If your platform can run a long-lived worker/container process, point it to the published image from GHCR and provide environment variables from `.env` or set them directly in the platform dashboard.
 
 Main command inside the image:
 
