@@ -115,7 +115,6 @@ def _build_organizer_web_message(token: str) -> str:
     return (
         "\n\n🌐 <b>Ваш персональный фронтенд:</b>\n"
         f"<code>{web_url}</code>\n\n"
-        "По основному адресу интерфейс недоступен."
     )
 
 # Command handlers
