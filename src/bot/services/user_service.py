@@ -3,7 +3,7 @@
 from sqlalchemy import String, cast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.bot.models import User, UserRole
+from src.bot.models import CampaignAccess, User, UserRole
 from src.bot.utils.logging import logger
 
 ROLE_ALIASES: dict[str, UserRole] = {role.value: role for role in UserRole}
@@ -127,6 +127,103 @@ class UserService:
             await session.flush()
             logger.info(f"Updated invite_role for user {tg_id} to {invite_role}")
         return user
+
+    @staticmethod
+    async def update_user_campaign_id(
+        tg_id: int,
+        campaign_id: int | None,
+        session: AsyncSession,
+    ) -> User | None:
+        """Update user's campaign access."""
+        user = await UserService.get_user(tg_id=tg_id, session=session)
+        if user:
+            user.campaign_id = campaign_id
+            await session.flush()
+            logger.info(f"Updated campaign_id for user {tg_id} to {campaign_id}")
+        return user
+
+    @staticmethod
+    async def get_campaign_accesses(
+        tg_id: int,
+        session: AsyncSession,
+    ) -> list[CampaignAccess]:
+        """Get all campaign invite accesses for a user."""
+        result = await session.execute(
+            select(CampaignAccess).where(CampaignAccess.user_id == tg_id)
+        )
+        return list(result.scalars().all())
+
+    @staticmethod
+    async def get_campaign_access(
+        tg_id: int,
+        campaign_id: int,
+        invite_role: str,
+        session: AsyncSession,
+    ) -> CampaignAccess | None:
+        """Get a specific campaign invite access for a user."""
+        result = await session.execute(
+            select(CampaignAccess).where(
+                CampaignAccess.user_id == tg_id,
+                CampaignAccess.campaign_id == campaign_id,
+                CampaignAccess.invite_role == invite_role,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def grant_campaign_access(
+        tg_id: int,
+        campaign_id: int,
+        invite_role: str,
+        session: AsyncSession,
+        invite_code: str | None = None,
+    ) -> CampaignAccess:
+        """Grant per-campaign invite access without changing base user role."""
+        access = await UserService.get_campaign_access(
+            tg_id=tg_id,
+            campaign_id=campaign_id,
+            invite_role=invite_role,
+            session=session,
+        )
+        if access:
+            if invite_code and access.invite_code != invite_code:
+                access.invite_code = invite_code
+                await session.flush()
+            logger.info(
+                f"Campaign access already exists for user {tg_id}: "
+                f"campaign={campaign_id}, invite_role={invite_role}"
+            )
+            return access
+
+        access = CampaignAccess(
+            user_id=tg_id,
+            campaign_id=campaign_id,
+            invite_role=invite_role,
+            invite_code=invite_code,
+        )
+        session.add(access)
+        await session.flush()
+        logger.info(
+            f"Granted campaign access for user {tg_id}: "
+            f"campaign={campaign_id}, invite_role={invite_role}"
+        )
+        return access
+
+    @staticmethod
+    async def has_campaign_access(
+        tg_id: int,
+        campaign_id: int,
+        invite_role: str,
+        session: AsyncSession,
+    ) -> bool:
+        """Check whether user has invite-based access to a campaign for a role."""
+        access = await UserService.get_campaign_access(
+            tg_id=tg_id,
+            campaign_id=campaign_id,
+            invite_role=invite_role,
+            session=session,
+        )
+        return access is not None
 
     @staticmethod
     async def ban_user(tg_id: int, session: AsyncSession) -> User | None:
@@ -299,6 +396,67 @@ async def update_user_invite_role(
     """Update user's invite role."""
     return await UserService.update_user_invite_role(
         tg_id, invite_role, session
+    )
+
+async def update_user_campaign_id(
+    tg_id: int,
+    campaign_id: int | None,
+    session: AsyncSession,
+) -> User | None:
+    """Update user's campaign access."""
+    return await UserService.update_user_campaign_id(
+        tg_id, campaign_id, session
+    )
+
+async def get_campaign_accesses(
+    tg_id: int,
+    session: AsyncSession,
+) -> list[CampaignAccess]:
+    """Get all campaign invite accesses for a user."""
+    return await UserService.get_campaign_accesses(tg_id, session)
+
+async def get_campaign_access(
+    tg_id: int,
+    campaign_id: int,
+    invite_role: str,
+    session: AsyncSession,
+) -> CampaignAccess | None:
+    """Get a specific campaign invite access for a user."""
+    return await UserService.get_campaign_access(
+        tg_id,
+        campaign_id,
+        invite_role,
+        session,
+    )
+
+async def grant_campaign_access(
+    tg_id: int,
+    campaign_id: int,
+    invite_role: str,
+    session: AsyncSession,
+    invite_code: str | None = None,
+) -> CampaignAccess:
+    """Grant per-campaign invite access without changing base user role."""
+    return await UserService.grant_campaign_access(
+        tg_id,
+        campaign_id,
+        invite_role,
+        session,
+        invite_code,
+    )
+
+async def has_campaign_access(
+    tg_id: int,
+    campaign_id: int,
+    invite_role: str,
+    session: AsyncSession,
+) -> bool:
+    """Check whether user has invite-based access to a campaign for a role."""
+    return await UserService.has_campaign_access(
+        tg_id,
+        campaign_id,
+        invite_role,
+        session,
     )
 
 async def ban_user(tg_id: int, session: AsyncSession) -> User | None:

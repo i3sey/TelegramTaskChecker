@@ -9,11 +9,11 @@ from src.bot.states import RegistrationStates, RoleChangeStates
 from src.db.models import UserRole
 from src.db.engine import session_scope
 from src.bot.services.user_service import (
-    get_user,
     create_user,
+    get_campaign_accesses,
+    get_user,
+    grant_campaign_access,
     update_user_role,
-    update_user_registered_by_code,
-    update_user_invite_role,
 )
 from src.bot.services.invite_service import (
     get_invite_by_code,
@@ -81,13 +81,16 @@ def _invite_matches_role(invite_role: str | None, role: UserRole) -> bool:
     return True
 
 
-def _has_invite_access(user) -> bool:
+async def _has_invite_access(user, session) -> bool:
     """Check if user has valid invite access for their role."""
     if not _role_requires_invite(user.role):
         return True
-    if not user.registered_by_code:
-        return False
-    return _invite_matches_role(user.invite_role, user.role)
+
+    if user.registered_by_code and _invite_matches_role(user.invite_role, user.role):
+        return True
+
+    accesses = await get_campaign_accesses(user.tg_id, session)
+    return any(_invite_matches_role(access.invite_role, user.role) for access in accesses)
 
 
 # Command handlers
@@ -110,24 +113,15 @@ async def cmd_start(message: types.Message, state: FSMContext):
         existing_user = await get_user(tg_id=tg_id, session=session)
 
         if existing_user:
-            if invite_ok and (
-                not existing_user.registered_by_code
-                or existing_user.invite_role != invite_role
-            ):
-                await update_user_registered_by_code(
+            if invite_ok and invite_campaign_id is not None and invite_role is not None:
+                await grant_campaign_access(
                     tg_id=tg_id,
-                    registered_by_code=True,
-                    session=session,
-                )
-                await update_user_invite_role(
-                    tg_id=tg_id,
+                    campaign_id=invite_campaign_id,
                     invite_role=invite_role,
+                    invite_code=payload,
                     session=session,
                 )
                 await mark_invite_used(invite, session)
-                existing_user.registered_by_code = True
-                existing_user.invite_role = invite_role
-                existing_user.campaign_id = invite_campaign_id
 
                 if invite_role == "student":
                     await message.answer(
@@ -142,7 +136,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
 
             extra_notice = ""
             # Don't show invite warning if we just validated an invite
-            if not invite_ok and not _has_invite_access(existing_user):
+            if not invite_ok and not await _has_invite_access(existing_user, session):
                 extra_notice = (
                     "\n\n🔐 <b>Для полного доступа нужен код приглашения.</b>\n"
                     "Что делать:\n"
@@ -312,11 +306,24 @@ async def reg_confirm_full_name(callback: types.CallbackQuery, state: FSMContext
                 study_group=None,
                 session=session,
                 role=role,
-                registered_by_code=invite_ok if _role_requires_invite(role) else False,
-                invite_role=invite_role if _role_requires_invite(role) else None,
-                campaign_id=invite_campaign_id if invite_ok else None,
+                registered_by_code=False,
+                invite_role=None,
+                campaign_id=None,
             )
-            if invite_ok and invite and _role_requires_invite(role):
+            if (
+                invite_ok
+                and invite
+                and _role_requires_invite(role)
+                and invite_campaign_id is not None
+                and invite_role is not None
+            ):
+                await grant_campaign_access(
+                    tg_id=callback.from_user.id,
+                    campaign_id=invite_campaign_id,
+                    invite_role=invite_role,
+                    invite_code=invite_code,
+                    session=session,
+                )
                 await mark_invite_used(invite, session)
 
         await state.clear()
@@ -394,11 +401,18 @@ async def process_study_group(message: types.Message, state: FSMContext):
                 study_group=study_group,
                 session=session,
                 role=UserRole.STUDENT,
-                registered_by_code=invite_ok,
-                invite_role=invite_role,
-                campaign_id=invite_campaign_id if invite_ok else None,
+                registered_by_code=False,
+                invite_role=None,
+                campaign_id=None,
             )
-            if invite_ok and invite:
+            if invite_ok and invite and invite_campaign_id is not None and invite_role is not None:
+                await grant_campaign_access(
+                    tg_id=tg_id,
+                    campaign_id=invite_campaign_id,
+                    invite_role=invite_role,
+                    invite_code=invite_code,
+                    session=session,
+                )
                 await mark_invite_used(invite, session)
             logger.info(
                 f"New user registered: tg_id={tg_id}, "
@@ -562,6 +576,7 @@ async def process_role_change(callback: types.CallbackQuery, state: FSMContext):
             return
 
         user = await update_user_role(tg_id=tg_id, role=role, session=session)
+        has_access = await _has_invite_access(user, session)
 
     await state.clear()
 
@@ -569,7 +584,7 @@ async def process_role_change(callback: types.CallbackQuery, state: FSMContext):
         "✅ Роль обновлена.\n\n"
         f"Теперь вы: <b>{_role_label(role)}</b>"
     )
-    if _role_requires_invite(role) and not _has_invite_access(user):
+    if _role_requires_invite(role) and not has_access:
         message_text += (
             "\n\nДоступ к функциям роли будет открыт после инвайта. "
             "Откройте ссылку приглашения"

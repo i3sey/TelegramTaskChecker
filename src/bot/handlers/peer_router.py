@@ -29,7 +29,7 @@ from src.bot.services.submission_service import (
     replace_submission_content,
 )
 from src.db.models import SubmissionStatus
-from src.bot.services.user_service import get_user
+from src.bot.services.user_service import get_campaign_accesses, get_user
 from src.bot.keyboards import (
     BTN_P2P_REVIEW,
     BTN_VOTE,
@@ -139,11 +139,17 @@ async def _get_student(message: types.Message):
         if user.role != UserRole.STUDENT:
             await message.answer("⛔ Эта команда доступна только студентам.")
             return None
-        if not user.registered_by_code or user.invite_role != "student":
+
+        student_accesses = await get_campaign_accesses(tg_id=tg_id, session=session)
+        has_student_access = any(
+            access.invite_role == "student" for access in student_accesses
+        )
+        if not has_student_access:
             await message.answer(
-                "⛔ Для доступа нужен инвайт. Откройте ссылку приглашения."
+                "⛔ Для доступа нужен студенческий инвайт. Откройте ссылку приглашения."
             )
             return None
+
         if user.is_banned:
             await message.answer("⛔ Ваш аккаунт заблокирован.")
             return None

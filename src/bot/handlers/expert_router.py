@@ -142,23 +142,6 @@ async def _check_expert_access(
             elif answer_message:
                 await answer_message.answer("⛔ Эта команда доступна только для экспертов.")
             return False
-        if user.role == UserRole.EXPERT and (
-            not user.registered_by_code or user.invite_role != "expert"
-        ):
-            if answer_callback:
-                await answer_callback.answer(
-                    "⛔ Для роли эксперта нужен инвайт.",
-                    show_alert=True,
-                )
-            elif answer_message:
-                extra_hint = ""
-                await answer_message.answer(
-                    "⛔ Для роли эксперта нужен инвайт. "
-                    "Откройте ссылку приглашения"
-                    f"{extra_hint}",
-                    parse_mode="HTML",
-                )
-            return False
         if user.is_banned:
             if answer_callback:
                 await answer_callback.answer("⛔ Ваш аккаунт заблокирован.", show_alert=True)

@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -91,11 +92,55 @@ class User(Base):
         foreign_keys="Submission.author_id",
     )
     reviews: Mapped[list["Review"]] = relationship("Review", back_populates="reviewer")
+    campaign_accesses: Mapped[list["CampaignAccess"]] = relationship(
+        "CampaignAccess",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         Index("ix_users_role", "role"),
         Index("ix_users_is_banned", "is_banned"),
         Index("ix_users_campaign_id", "campaign_id"),
+    )
+
+class CampaignAccess(Base):
+    """Per-campaign access granted by invite without changing base user role."""
+    __tablename__ = "campaign_accesses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("users.tg_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    campaign_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("campaigns.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    invite_role: Mapped[str] = mapped_column(String(50), nullable=False)
+    invite_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    user: Mapped["User"] = relationship("User", back_populates="campaign_accesses")
+    campaign: Mapped["Campaign"] = relationship("Campaign", back_populates="accesses")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "campaign_id", "invite_role", name="uq_campaign_access_user_campaign_role"),
+        Index("ix_campaign_accesses_user_id", "user_id"),
+        Index("ix_campaign_accesses_campaign_id", "campaign_id"),
+        Index("ix_campaign_accesses_invite_role", "invite_role"),
     )
 
 class InviteCode(Base):
@@ -183,6 +228,11 @@ class Campaign(Base):
     # Relationships
     submissions: Mapped[list["Submission"]] = relationship(
         "Submission",
+        back_populates="campaign",
+        cascade="all, delete-orphan",
+    )
+    accesses: Mapped[list["CampaignAccess"]] = relationship(
+        "CampaignAccess",
         back_populates="campaign",
         cascade="all, delete-orphan",
     )

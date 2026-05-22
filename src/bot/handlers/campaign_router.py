@@ -18,7 +18,11 @@ from src.db.models import (
     InviteCode,
     SubmissionFormat,
 )
-from src.bot.services.user_service import get_user
+from src.bot.services.user_service import (
+    get_user,
+    get_campaign_accesses,
+    has_campaign_access,
+)
 from src.bot.services.campaign_service import (
     CampaignService,
     get_campaign,
@@ -1594,19 +1598,18 @@ async def cmd_submit(message: types.Message, state: FSMContext):
             )
             return
 
-        if user.role == UserRole.STUDENT and (not user.registered_by_code or user.invite_role != "student"):
-            await message.answer(
-                "❌ Для сдачи работ нужен код доступа. "
-                "Откройте ссылку приглашения"
-            )
-            return
+        student_accesses = await get_campaign_accesses(tg_id=tg_id, session=session)
+        student_campaign_ids = {
+            access.campaign_id
+            for access in student_accesses
+            if access.invite_role == "student"
+        }
 
-        # Get active campaigns
-        campaigns = await get_active_campaigns(session)
-        if user.campaign_id is not None:
-            campaigns = [campaign for campaign in campaigns if campaign.id == user.campaign_id]
-        else:
-            campaigns = []
+        campaigns = [
+            campaign
+            for campaign in await get_active_campaigns(session)
+            if campaign.id in student_campaign_ids
+        ]
 
         if not campaigns:
             await message.answer(
@@ -1651,10 +1654,13 @@ async def process_campaign_selection(callback: types.CallbackQuery, state: FSMCo
         if not user or user.role != UserRole.STUDENT:
             await callback.answer("❌ Сдача работ доступна только студентам", show_alert=True)
             return
-        if not user.registered_by_code or user.invite_role != "student":
-            await callback.answer("❌ Для сдачи работ нужен код доступа", show_alert=True)
-            return
-        if user.campaign_id is None or user.campaign_id != campaign_id:
+        has_student_access = await has_campaign_access(
+            tg_id=callback.from_user.id,
+            campaign_id=campaign_id,
+            invite_role="student",
+            session=session,
+        )
+        if not has_student_access:
             await callback.answer("❌ У вас нет доступа к этой кампании", show_alert=True)
             return
 
