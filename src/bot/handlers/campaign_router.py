@@ -1491,7 +1491,7 @@ async def finish_campaign(callback: types.CallbackQuery) -> None:
             await callback.answer("Кампания не найдена", show_alert=True)
             return
 
-        if campaign.organizer_id != user.id:
+        if campaign.organizer_id != user.tg_id:
             await callback.answer("Доступ к этой кампании запрещен", show_alert=True)
             return
 
@@ -1543,7 +1543,7 @@ async def finish_campaign_confirm(callback: types.CallbackQuery) -> None:
             await callback.answer("Кампания не найдена", show_alert=True)
             return
 
-        if campaign.organizer_id != user.id:
+        if campaign.organizer_id != user.tg_id:
             await callback.answer("Доступ к этой кампании запрещен", show_alert=True)
             return
 
