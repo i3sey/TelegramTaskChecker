@@ -36,7 +36,6 @@ from src.bot.keyboards import (
     build_comment_skip_keyboard,
     build_ban_comment_keyboard,
     build_review_confirmation_keyboard,
-    build_post_review_keyboard,
     build_voice_comment_action_keyboard,
     build_transcribed_comment_keyboard,
     get_keyboard_for_role,
@@ -1051,10 +1050,19 @@ async def handle_confirm_callback(callback: types.CallbackQuery, state: FSMConte
             score=score,
             comment_summary=comment_summary,
             criteria_scores=criteria_scores,
-            extra_text="Можно сразу взять следующую работу или открыть статистику.",
+            extra_text="Можно сразу взять следующую работу.",
         ),
         parse_mode="HTML",
-        reply_markup=build_post_review_keyboard(),
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🟢 Взять следующую",
+                        callback_data="expert_take_next",
+                    )
+                ]
+            ]
+        ),
     )
     if reply_markup:
         await message.answer("Меню эксперта обновлено.", reply_markup=reply_markup)
