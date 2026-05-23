@@ -197,8 +197,6 @@ class CampaignService:
     ) -> list[Campaign]:
         """
         Get all campaigns created by a specific organizer.
-        Note: We filter by checking submissions author or store organizer_id in campaign.
-        For now, we return all campaigns (organizer filter would require adding organizer_id column).
 
         Args:
             organizer_id: Organizer's user ID
@@ -209,10 +207,9 @@ class CampaignService:
         """
         await CampaignService._deactivate_expired_campaigns(session)
 
-        # The Campaign model does not store organizer_id yet, so organizer-specific filtering
-        # is not available. For now, organizers see the full list of campaigns.
         result = await session.execute(
             select(Campaign)
+            .where(Campaign.organizer_id == organizer_id)
             .order_by(Campaign.created_at.desc())
         )
         return list(result.scalars().all())
@@ -253,6 +250,7 @@ class CampaignService:
             Created Campaign object
         """
         campaign = Campaign(
+            organizer_id=organizer_id,
             title=title,
             type=campaign_type,
             min_score=min_score,

@@ -1491,6 +1491,10 @@ async def finish_campaign(callback: types.CallbackQuery) -> None:
             await callback.answer("Кампания не найдена", show_alert=True)
             return
 
+        if campaign.organizer_id != user.id:
+            await callback.answer("Доступ к этой кампании запрещен", show_alert=True)
+            return
+
         if not campaign.is_active:
             stats = await _campaign_stats(campaign_id, session)
             await callback.answer("Кампания уже завершена", show_alert=True)
@@ -1537,6 +1541,10 @@ async def finish_campaign_confirm(callback: types.CallbackQuery) -> None:
         campaign = await get_campaign(campaign_id, session)
         if not campaign:
             await callback.answer("Кампания не найдена", show_alert=True)
+            return
+
+        if campaign.organizer_id != user.id:
+            await callback.answer("Доступ к этой кампании запрещен", show_alert=True)
             return
 
         campaign_title = campaign.title
@@ -1609,12 +1617,6 @@ async def cmd_submit(message: types.Message, state: FSMContext):
             )
             return
 
-        if user.role != UserRole.STUDENT:
-            await message.answer(
-                "❌ Сдача работ доступна только студентам."
-            )
-            return
-
         student_accesses = await get_campaign_accesses(tg_id=tg_id, session=session)
         student_campaign_ids = {
             access.campaign_id
@@ -1668,8 +1670,8 @@ async def process_campaign_selection(callback: types.CallbackQuery, state: FSMCo
     # Verify campaign exists and user has access to it
     async with session_scope() as session:
         user = await get_user(tg_id=callback.from_user.id, session=session)
-        if not user or user.role != UserRole.STUDENT:
-            await callback.answer("❌ Сдача работ доступна только студентам", show_alert=True)
+        if not user:
+            await callback.answer("❌ Пользователь не найден", show_alert=True)
             return
         has_student_access = await has_campaign_access(
             tg_id=callback.from_user.id,

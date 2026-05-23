@@ -205,7 +205,8 @@ class ReviewService:
     @staticmethod
     async def get_submission_pending(
         session: AsyncSession,
-        limit: int = 10
+        limit: int = 10,
+        campaign_ids: list[int] | set[int] | tuple[int, ...] | None = None,
     ) -> list[Submission]:
         """
         Get submissions that are waiting for review (status=uploaded).
@@ -213,44 +214,59 @@ class ReviewService:
         Args:
             session: Database session
             limit: Maximum number of submissions to return
+            campaign_ids: Optional list of expert-accessible campaign IDs
 
         Returns:
             List of Submission objects
         """
+        if campaign_ids is not None and not campaign_ids:
+            return []
+
+        conditions = [
+            Submission.status == SubmissionStatus.UPLOADED,
+            Campaign.type == CampaignType.EXPERT,
+        ]
+        if campaign_ids is not None:
+            conditions.append(Submission.campaign_id.in_(campaign_ids))
+
         result = await session.execute(
             select(Submission)
             .join(Campaign, Submission.campaign_id == Campaign.id)
-            .where(
-                and_(
-                    Submission.status == SubmissionStatus.UPLOADED,
-                    Campaign.type == CampaignType.EXPERT,
-                )
-            )
+            .where(and_(*conditions))
             .order_by(Submission.created_at.asc())
             .limit(limit)
         )
         return list(result.scalars().all())
 
     @staticmethod
-    async def count_pending_submissions(session: AsyncSession) -> int:
+    async def count_pending_submissions(
+        session: AsyncSession,
+        campaign_ids: list[int] | set[int] | tuple[int, ...] | None = None,
+    ) -> int:
         """
         Count submissions that are waiting for review.
 
         Args:
             session: Database session
+            campaign_ids: Optional list of expert-accessible campaign IDs
 
         Returns:
             Number of pending submissions
         """
+        if campaign_ids is not None and not campaign_ids:
+            return 0
+
+        conditions = [
+            Submission.status == SubmissionStatus.UPLOADED,
+            Campaign.type == CampaignType.EXPERT,
+        ]
+        if campaign_ids is not None:
+            conditions.append(Submission.campaign_id.in_(campaign_ids))
+
         result = await session.execute(
             select(func.count(Submission.id))
             .join(Campaign, Submission.campaign_id == Campaign.id)
-            .where(
-                and_(
-                    Submission.status == SubmissionStatus.UPLOADED,
-                    Campaign.type == CampaignType.EXPERT,
-                )
-            )
+            .where(and_(*conditions))
         )
         return int(result.scalar_one() or 0)
 
@@ -345,12 +361,16 @@ async def update_review(
 
 async def get_submission_pending(
     session: AsyncSession,
-    limit: int = 10
+    limit: int = 10,
+    campaign_ids: list[int] | set[int] | tuple[int, ...] | None = None,
 ) -> list[Submission]:
     """Get pending submissions for review."""
-    return await ReviewService.get_submission_pending(session, limit)
+    return await ReviewService.get_submission_pending(session, limit, campaign_ids)
 
 
-async def count_pending_submissions(session: AsyncSession) -> int:
+async def count_pending_submissions(
+    session: AsyncSession,
+    campaign_ids: list[int] | set[int] | tuple[int, ...] | None = None,
+) -> int:
     """Count pending submissions."""
-    return await ReviewService.count_pending_submissions(session)
+    return await ReviewService.count_pending_submissions(session, campaign_ids)

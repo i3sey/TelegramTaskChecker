@@ -178,6 +178,11 @@ class Campaign(Base):
     __tablename__ = "campaigns"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organizer_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("users.tg_id", ondelete="SET NULL"),
+        nullable=True,
+    )
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     type: Mapped[CampaignType] = mapped_column(
         Enum(CampaignType, name="campaign_type"),
@@ -240,6 +245,7 @@ class Campaign(Base):
     )
 
     __table_args__ = (
+        Index("ix_campaigns_organizer_id", "organizer_id"),
         Index("ix_campaigns_type", "type"),
         Index("ix_campaigns_is_active", "is_active"),
     )

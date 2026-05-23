@@ -1,5 +1,6 @@
 """Expert handler router for review and feedback commands."""
 from typing import Any
+from sqlalchemy import select
 from aiogram import Bot, Router, types, F
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -8,7 +9,12 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from src.db.engine import session_scope
 from src.db.models import UserRole, SubmissionStatus, SubmissionFormat, User, Campaign
-from src.bot.services.user_service import get_user, get_users_by_role
+from src.bot.services.user_service import (
+    get_user,
+    get_users_by_role,
+    get_campaign_accesses,
+    has_campaign_access,
+)
 from src.bot.services.submission_service import get_submission, update_submission_status
 from src.bot.services.review_service import create_review, count_pending_submissions, get_submission_pending
 from src.bot.services.campaign_service import CampaignService, get_campaign
@@ -156,6 +162,47 @@ async def check_expert_role(message: types.Message) -> bool:
         message.from_user.id,
         answer_message=message,
     )
+
+async def _get_expert_campaign_ids(tg_id: int) -> set[int]:
+    """Return campaign IDs available for expert review."""
+    async with session_scope() as session:
+        user = await get_user(tg_id=tg_id, session=session)
+        accesses = await get_campaign_accesses(tg_id=tg_id, session=session)
+
+        campaign_ids = {
+            access.campaign_id
+            for access in accesses
+            if access.invite_role == "expert"
+        }
+
+        if user and user.role == UserRole.EXPERT_ORGANIZER:
+            organizer_campaign_ids = await session.scalars(
+                select(Campaign.id).where(Campaign.organizer_id == tg_id)
+            )
+            campaign_ids.update(organizer_campaign_ids.all())
+
+    return campaign_ids
+
+async def _has_expert_review_access(
+    tg_id: int,
+    campaign_id: int,
+    session,
+) -> bool:
+    """Check whether user can review submissions in the given campaign."""
+    if await has_campaign_access(
+        tg_id=tg_id,
+        campaign_id=campaign_id,
+        invite_role="expert",
+        session=session,
+    ):
+        return True
+
+    user = await get_user(tg_id=tg_id, session=session)
+    if not user or user.role != UserRole.EXPERT_ORGANIZER:
+        return False
+
+    campaign = await get_campaign(campaign_id, session)
+    return bool(campaign and campaign.organizer_id == tg_id)
 
 
 async def _send_submission_content(
@@ -345,10 +392,25 @@ async def _try_assign_submission_to_expert(
             await message.answer("⚠️ Работа уже недоступна. Нажмите /take ещё раз.")
             return False
 
+        if not await _has_expert_review_access(
+            tg_id=tg_id,
+            campaign_id=submission.campaign_id,
+            session=session,
+        ):
+            return False
+
         campaign = await get_campaign(submission.campaign_id, session)
         author = await get_user(tg_id=submission.author_id, session=session)
         if not campaign or not author:
             await message.answer("⚠️ Не удалось получить данные работы. Нажмите /take ещё раз.")
+            return False
+
+        if author.tg_id == tg_id:
+            await message.answer(
+                "⛔ Нельзя брать на проверку собственную работу.\n"
+                "Нажмите /take, чтобы получить другую.",
+                parse_mode="HTML",
+            )
             return False
 
         if submission.status != SubmissionStatus.UPLOADED:
@@ -418,10 +480,32 @@ async def _deliver_current_submission(
             await state.clear()
             return False
 
+        if not await _has_expert_review_access(
+            tg_id=tg_id,
+            campaign_id=submission.campaign_id,
+            session=session,
+        ):
+            await message.answer(
+                "⛔ У вас больше нет экспертского доступа к кампании этой работы.",
+                parse_mode="HTML",
+            )
+            await queue_service.clear_expert_current_submission(tg_id)
+            await state.clear()
+            return False
+
         campaign = await get_campaign(submission.campaign_id, session)
         author = await get_user(tg_id=submission.author_id, session=session)
         if not campaign or not author:
             await message.answer("⚠️ Не удалось восстановить текущую работу. Нажмите /take еще раз.")
+            await queue_service.clear_expert_current_submission(tg_id)
+            await state.clear()
+            return False
+
+        if author.tg_id == tg_id:
+            await message.answer(
+                "⛔ Нельзя проверять собственную работу.",
+                parse_mode="HTML",
+            )
             await queue_service.clear_expert_current_submission(tg_id)
             await state.clear()
             return False
@@ -454,8 +538,10 @@ async def cmd_queue(message: types.Message) -> None:
 
     logger.info(f"Expert {message.from_user.id} requested queue status")
 
+    expert_campaign_ids = await _get_expert_campaign_ids(message.from_user.id)
+
     async with session_scope() as session:
-        count = await count_pending_submissions(session)
+        count = await count_pending_submissions(session, campaign_ids=expert_campaign_ids)
 
     # Also show Redis-locked submissions
     locked = await queue_service.get_all_locked_submissions()
@@ -521,8 +607,14 @@ async def cmd_take(
         else:
             await queue_service.clear_expert_current_submission(tg_id)
 
+    expert_campaign_ids = await _get_expert_campaign_ids(tg_id)
+
     async with session_scope() as session:
-        submissions = await get_submission_pending(session, limit=10)
+        submissions = await get_submission_pending(
+            session,
+            limit=10,
+            campaign_ids=expert_campaign_ids,
+        )
 
     for submission in submissions:
         if await _try_assign_submission_to_expert(

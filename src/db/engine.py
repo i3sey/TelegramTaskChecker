@@ -114,6 +114,18 @@ async def _ensure_schema(conn) -> None:
     await conn.execute(
         text(
             "ALTER TABLE campaigns "
+            "ADD COLUMN IF NOT EXISTS organizer_id BIGINT"
+        )
+    )
+    await conn.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_campaigns_organizer_id "
+            "ON campaigns (organizer_id)"
+        )
+    )
+    await conn.execute(
+        text(
+            "ALTER TABLE campaigns "
             "ADD COLUMN IF NOT EXISTS p2p_reviews_required INTEGER NOT NULL DEFAULT 3"
         )
     )

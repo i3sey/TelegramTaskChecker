@@ -68,15 +68,15 @@ def _extract_start_payload(text: str | None) -> str | None:
 
 def _role_requires_invite(role: UserRole) -> bool:
     """Return True if role requires invite access."""
-    return role in (UserRole.STUDENT, UserRole.EXPERT, UserRole.EXPERT_ORGANIZER)
+    return role in (UserRole.STUDENT, UserRole.EXPERT)
 
 def _invite_matches_role(invite_role: str | None, role: UserRole) -> bool:
     """Return True when invite role allows the requested role."""
     if role == UserRole.STUDENT:
         return invite_role == "student"
-    if role in (UserRole.EXPERT, UserRole.EXPERT_ORGANIZER):
+    if role == UserRole.EXPERT:
         return invite_role == "expert"
-    return True
+    return False
 
 async def _has_invite_access(user, session) -> bool:
     """Check if user has valid invite access for their role."""
@@ -167,7 +167,8 @@ async def cmd_start(message: types.Message, state: FSMContext):
                     "• попросите код или ссылку приглашения у преподавателя / организатора;\n"
                     "• откройте ссылку-приглашение, если вам её прислали;\n"
                     "• либо отправьте команду <code>/start ВАШ_КОД</code>.\n\n"
-                    "Без кода вы сможете войти в бота, но некоторые действия для выбранной роли будут недоступны."
+                    "Без кода вы сможете войти в бота, но некоторые действия для выбранной роли будут недоступны.\n"
+                    "Режимы организатора открываются только реальными правами организатора, а не student/expert-инвайтом."
                 )
 
             commands_text = (
@@ -217,6 +218,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
                     + "\n\n"
                     + "🔐 <b>Для роли студента или эксперта может понадобиться код приглашения.</b>\n"
                     + "Если у вас его пока нет, попросите код или ссылку у преподавателя / организатора.\n"
+                    + "Режимы организатора открываются только реальными правами в системе.\n"
                     + "Код можно будет отправить позже командой <code>/start ВАШ_КОД</code>.",
                     reply_markup=_build_role_keyboard(),
                     parse_mode="HTML",
