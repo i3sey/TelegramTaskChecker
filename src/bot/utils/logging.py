@@ -41,15 +41,19 @@ def setup_logging(
     console_handler.setLevel(numeric_level)
     console_handler.setFormatter(formatter)
 
-    # File handler with rotation
-    file_handler = RotatingFileHandler(
-        log_file,
-        maxBytes=max_bytes,
-        backupCount=backup_count,
-        encoding="utf-8",
-    )
-    file_handler.setLevel(numeric_level)
-    file_handler.setFormatter(formatter)
+    # File handler with rotation (graceful fallback if log file is not writable)
+    try:
+        file_handler = RotatingFileHandler(
+            log_file,
+            maxBytes=max_bytes,
+            backupCount=backup_count,
+            encoding="utf-8",
+        )
+        file_handler.setLevel(numeric_level)
+        file_handler.setFormatter(formatter)
+        _file_handler: logging.Handler | None = file_handler
+    except (PermissionError, OSError):
+        _file_handler = None
 
     # Configure root logger
     root_logger = logging.getLogger()
@@ -58,7 +62,8 @@ def setup_logging(
     # Avoid duplicate handlers
     if not root_logger.handlers:
         root_logger.addHandler(console_handler)
-        root_logger.addHandler(file_handler)
+        if _file_handler is not None:
+            root_logger.addHandler(_file_handler)
 
     # Suppress noisy third-party loggers
     logging.getLogger("aiogram").setLevel(logging.INFO)

@@ -1,14 +1,12 @@
 """Redis-based queue service for managing submission review locks."""
 import json
-from datetime import datetime
+import secrets
+from datetime import datetime, timezone
 from typing import Any
 
 import redis.asyncio as redis
 
 from src.config import config
-from src.bot.models import SubmissionStatus
-
-
 class QueueService:
     """Redis queue service for managing review locks and TTL."""
 
@@ -39,12 +37,15 @@ class QueueService:
     def _expert_submissions_key(self, expert_id: int) -> str:
         return f"expert_submissions:{expert_id}"
 
+    def _review_deadlines_key(self) -> str:
+        return "review_lock_deadlines"
+
     async def lock_submission(
         self,
         submission_id: int,
         expert_id: int,
         ttl_minutes: int,
-    ) -> bool:
+    ) -> str | None:
         """
         Lock a submission for review. Returns True if lock acquired.
 
@@ -54,46 +55,86 @@ class QueueService:
             ttl_minutes: Time-to-live in minutes
 
         Returns:
-            True if lock was acquired, False if submission already locked
+            Opaque lock token if acquired, otherwise None
         """
         client = await self.get_client()
         key = self._active_review_key(submission_id)
         ttl_seconds = ttl_minutes * 60
+        lock_token = secrets.token_urlsafe(24)
 
-        # Try to set key only if it doesn't exist (NX)
         result = await client.set(
             key,
             json.dumps({
                 "expert_id": expert_id,
-                "locked_at": datetime.utcnow().isoformat(),
+                "locked_at": datetime.now(timezone.utc).isoformat(),
+                "token": lock_token,
             }),
             ex=ttl_seconds,
             nx=True,
         )
         if result:
+            deadline = datetime.now(timezone.utc).timestamp() + ttl_seconds
             await client.set(
                 self._expert_submissions_key(expert_id),
                 str(submission_id),
                 ex=ttl_seconds,
             )
-        return result is not None
+            await client.zadd(
+                self._review_deadlines_key(),
+                {str(submission_id): deadline},
+            )
+            return lock_token
+        return None
 
-    async def unlock_submission(self, submission_id: int) -> bool:
+    async def unlock_submission(
+        self,
+        submission_id: int,
+        *,
+        expert_id: int,
+        lock_token: str,
+    ) -> bool:
+        """Release a lock only when both owner and opaque token match."""
+        client = await self.get_client()
+        key = self._active_review_key(submission_id)
+        owner_key = self._expert_submissions_key(expert_id)
+        script = """
+        local raw = redis.call('GET', KEYS[1])
+        if not raw then return 0 end
+        local lock = cjson.decode(raw)
+        if tostring(lock.expert_id) ~= ARGV[1] or lock.token ~= ARGV[2] then
+            return 0
+        end
+        redis.call('DEL', KEYS[1])
+        if redis.call('GET', KEYS[2]) == ARGV[3] then
+            redis.call('DEL', KEYS[2])
+        end
+        redis.call('ZREM', KEYS[3], ARGV[3])
+        return 1
         """
-        Unlock a submission. Returns True if was locked.
+        result = await client.eval(
+            script,
+            3,
+            key,
+            owner_key,
+            self._review_deadlines_key(),
+            str(expert_id),
+            lock_token,
+            str(submission_id),
+        )
+        return bool(result)
 
-        Args:
-            submission_id: Submission ID
-
-        Returns:
-            True if submission was unlocked
-        """
+    async def force_unlock_submission(self, submission_id: int) -> bool:
+        """Administrative cleanup for stale locks."""
         client = await self.get_client()
         key = self._active_review_key(submission_id)
         lock_info = await self.get_lock_info(submission_id)
         result = await client.delete(key)
         if lock_info and lock_info.get("expert_id") is not None:
-            await client.delete(self._expert_submissions_key(int(lock_info["expert_id"])))
+            owner_id = int(lock_info["expert_id"])
+            owner_key = self._expert_submissions_key(owner_id)
+            if await client.get(owner_key) == str(submission_id):
+                await client.delete(owner_key)
+        await client.zrem(self._review_deadlines_key(), str(submission_id))
         return result > 0
 
     async def get_expert_current_submission(self, expert_id: int) -> int | None:
@@ -139,18 +180,24 @@ class QueueService:
         key = self._active_review_key(submission_id)
         new_ttl = minutes * 60
         result = await client.expire(key, new_ttl)
+        if result:
+            deadline = datetime.now(timezone.utc).timestamp() + new_ttl
+            await client.zadd(
+                self._review_deadlines_key(),
+                {str(submission_id): deadline},
+            )
         return result
 
     async def get_expired_submissions(self) -> list[int]:
-        """Get list of submission IDs with expired locks (for cleanup)."""
+        """Get submission IDs whose logical lock deadline has passed."""
         client = await self.get_client()
-        expired = []
-        async for key in client.scan_iter("active_review:*"):
-            ttl = await client.ttl(key)
-            if ttl < 0:  # No TTL or expired
-                submission_id = int(key.split(":")[1])
-                expired.append(submission_id)
-        return expired
+        now = datetime.now(timezone.utc).timestamp()
+        values = await client.zrangebyscore(
+            self._review_deadlines_key(),
+            min="-inf",
+            max=now,
+        )
+        return [int(value) for value in values]
 
     async def get_all_locked_submissions(self) -> list[dict[str, Any]]:
         """Get all currently locked submissions."""

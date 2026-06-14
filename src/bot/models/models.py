@@ -31,7 +31,6 @@ class CampaignType(str, enum.Enum):
     """Campaign types."""
     EXPERT = "expert"
     P2P = "p2p"
-    VOTING = "voting"
 
 class SubmissionStatus(str, enum.Enum):
     """Submission status."""
@@ -201,7 +200,6 @@ class Campaign(Base):
         default=3,
         nullable=False,
     )
-    voting_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     submission_format: Mapped[SubmissionFormat] = mapped_column(
         Enum(SubmissionFormat, name="submission_format"),
         default=SubmissionFormat.DOCUMENT,
@@ -280,6 +278,10 @@ class Submission(Base):
         default=SubmissionStatus.UPLOADED,
         nullable=False,
     )
+    p2p_completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -309,6 +311,7 @@ class Submission(Base):
         Index("ix_submissions_campaign_id", "campaign_id"),
         Index("ix_submissions_author_id", "author_id"),
         Index("ix_submissions_status", "status"),
+        Index("ix_submissions_p2p_completed_at", "p2p_completed_at"),
         Index("ix_submissions_author_campaign", "author_id", "campaign_id"),
     )
 
@@ -349,6 +352,11 @@ class Review(Base):
     reviewer: Mapped["User"] = relationship("User", back_populates="reviews")
 
     __table_args__ = (
+        UniqueConstraint(
+            "submission_id",
+            "reviewer_id",
+            name="uq_reviews_submission_reviewer",
+        ),
         Index("ix_reviews_submission_id", "submission_id"),
         Index("ix_reviews_reviewer_id", "reviewer_id"),
     )

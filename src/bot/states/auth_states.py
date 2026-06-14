@@ -9,8 +9,3 @@ class RegistrationStates(StatesGroup):
     confirming_full_name = State()
     waiting_for_study_group = State()
     confirming_study_group = State()
-
-
-class RoleChangeStates(StatesGroup):
-    """States for user role change flow."""
-    waiting_for_role = State()

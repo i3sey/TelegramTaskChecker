@@ -38,7 +38,7 @@ async def check_expired_locks(bot: Bot) -> None:
                     expert_id = lock_info.get("expert_id") if lock_info else None
 
                     # Unlock from Redis
-                    await queue_service.unlock_submission(submission_id)
+                    await queue_service.force_unlock_submission(submission_id)
 
                     # Update DB status
                     async with session_scope() as session:

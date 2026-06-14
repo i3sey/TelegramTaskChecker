@@ -11,12 +11,6 @@ ROLE_LABELS = {
 CAMPAIGN_TYPE_LABELS = {
     CampaignType.EXPERT: "📊 Экспертная проверка",
     CampaignType.P2P: "👥 P2P-проверка",
-    CampaignType.VOTING: "🗳 Голосование",
-}
-
-VOTING_TYPE_LABELS = {
-    "like": "👍 Лайк",
-    "score": "⭐ Оценка",
 }
 
 SUBMISSION_STATUS_META = {
@@ -33,12 +27,6 @@ def role_label(role: UserRole) -> str:
 
 def campaign_type_label(campaign_type: CampaignType) -> str:
     return CAMPAIGN_TYPE_LABELS.get(campaign_type, str(campaign_type))
-
-
-def voting_type_label(voting_type: str | None) -> str:
-    if not voting_type:
-        return "Не задан"
-    return VOTING_TYPE_LABELS.get(voting_type, voting_type)
 
 
 def submission_status_meta(status: SubmissionStatus):
@@ -76,7 +64,6 @@ def help_text_for_role(role: UserRole | None) -> str:
         "<b>Общие команды:</b>\n"
         "/start — открыть главное меню\n"
         "/profile — посмотреть профиль\n"
-        "/role — сменить роль\n"
         "/help — показать справку\n"
         "/cancel — отменить текущий шаг\n"
     )
@@ -87,8 +74,7 @@ def help_text_for_role(role: UserRole | None) -> str:
             "/campaigns — посмотреть активные кампании\n"
             "/submit — загрузить работу\n"
             "/my_submissions — посмотреть все свои работы\n\n"
-            "/p2p — проверить работы других (если кампания P2P)\n"
-            "/vote — проголосовать в кампании\n\n"
+            "/p2p — проверить работы других (если кампания P2P)\n\n"
             "Совет: сначала откройте кампании, затем загрузите работу."
         )
     if role in (UserRole.EXPERT, UserRole.EXPERT_ORGANIZER):
@@ -119,7 +105,7 @@ def unavailable_role_text() -> str:
     return (
         "⛔ <b>Доступ ограничен</b>\n\n"
         "Эта функция недоступна для вашей текущей роли.\n"
-        "Если роль выбрана неверно, используйте /role."
+        "Для изменения роли обратитесь к администратору."
     )
 
 

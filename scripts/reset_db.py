@@ -44,6 +44,7 @@ async def _clear_redis_review_state() -> None:
             keys_to_delete.append(key)
         async for key in client.scan_iter("expert_submissions:*"):
             keys_to_delete.append(key)
+        keys_to_delete.append("review_lock_deadlines")
 
         if keys_to_delete:
             await client.delete(*keys_to_delete)

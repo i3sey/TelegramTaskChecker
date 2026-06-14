@@ -1,10 +1,21 @@
 """Review service for database operations."""
 import json
+from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.bot.models import Campaign, CampaignType, Review, Submission, SubmissionStatus
+from src.bot.models import (
+    Campaign,
+    CampaignAccess,
+    CampaignType,
+    Review,
+    Submission,
+    SubmissionStatus,
+    User,
+    UserRole,
+)
 from src.bot.utils.logging import logger
 
 
@@ -269,6 +280,133 @@ class ReviewService:
             .where(and_(*conditions))
         )
         return int(result.scalar_one() or 0)
+
+
+@dataclass(frozen=True)
+class P2PReviewResult:
+    review: Review
+    reviewer_review_count: int
+    submission_review_count: int
+    reviewer_completed: bool
+    submission_completed: bool
+
+
+async def create_p2p_review_atomic(
+    *,
+    submission_id: int,
+    campaign_id: int,
+    reviewer_id: int,
+    score: int,
+    comment_text: str | None,
+    session: AsyncSession,
+) -> P2PReviewResult:
+    """Validate and create one P2P review while holding the submission row lock."""
+    submission = (
+        await session.execute(
+            select(Submission)
+            .where(Submission.id == submission_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if submission is None or submission.campaign_id != campaign_id:
+        raise ValueError("submission_unavailable")
+    if submission.author_id == reviewer_id:
+        raise ValueError("own_submission")
+    if submission.status != SubmissionStatus.UPLOADED:
+        raise ValueError("submission_unavailable")
+
+    campaign = (
+        await session.execute(
+            select(Campaign).where(Campaign.id == campaign_id)
+        )
+    ).scalar_one_or_none()
+    if campaign is None or campaign.type != CampaignType.P2P or not campaign.is_active:
+        raise ValueError("campaign_unavailable")
+    deadline = campaign.campaign_deadline_at
+    if deadline is not None:
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=timezone.utc)
+        if deadline < datetime.now(timezone.utc):
+            raise ValueError("campaign_unavailable")
+    if score < campaign.min_score or score > campaign.max_score:
+        raise ValueError("invalid_score")
+
+    reviewer = (
+        await session.execute(
+            select(User).where(User.tg_id == reviewer_id)
+        )
+    ).scalar_one_or_none()
+    if reviewer is None or reviewer.role != UserRole.STUDENT or reviewer.is_banned:
+        raise ValueError("reviewer_forbidden")
+
+    access_exists = await session.scalar(
+        select(func.count(CampaignAccess.id)).where(
+            CampaignAccess.user_id == reviewer_id,
+            CampaignAccess.campaign_id == campaign_id,
+            CampaignAccess.invite_role == "student",
+        )
+    )
+    if not access_exists:
+        raise ValueError("reviewer_forbidden")
+
+    duplicate = await ReviewService.get_review_by_submission_and_reviewer(
+        submission_id,
+        reviewer_id,
+        session,
+    )
+    if duplicate is not None:
+        raise ValueError("duplicate_review")
+
+    submission_review_count = await ReviewService.count_submission_reviews(
+        submission_id,
+        session,
+    )
+    if submission_review_count >= campaign.p2p_reviews_required:
+        submission.status = SubmissionStatus.REVIEWED
+        await session.flush()
+        raise ValueError("submission_complete")
+
+    review = await ReviewService.create_review(
+        submission_id=submission_id,
+        reviewer_id=reviewer_id,
+        score=score,
+        comment_text=comment_text,
+        session=session,
+    )
+    submission_review_count += 1
+    submission_completed = submission_review_count >= campaign.p2p_reviews_required
+    if submission_completed:
+        submission.status = SubmissionStatus.REVIEWED
+
+    reviewer_review_count = await ReviewService.count_reviewer_reviews_for_campaign(
+        reviewer_id,
+        campaign_id,
+        session,
+    )
+    reviewer_completed = reviewer_review_count >= campaign.p2p_reviews_required
+    if reviewer_completed:
+        own_submission = (
+            await session.execute(
+                select(Submission)
+                .where(
+                    Submission.campaign_id == campaign_id,
+                    Submission.author_id == reviewer_id,
+                )
+                .order_by(Submission.created_at.desc(), Submission.id.desc())
+                .with_for_update()
+            )
+        ).scalars().first()
+        if own_submission is not None and own_submission.p2p_completed_at is None:
+            own_submission.p2p_completed_at = datetime.now(timezone.utc)
+
+    await session.flush()
+    return P2PReviewResult(
+        review=review,
+        reviewer_review_count=reviewer_review_count,
+        submission_review_count=submission_review_count,
+        reviewer_completed=reviewer_completed,
+        submission_completed=submission_completed,
+    )
 
 
 # Module-level convenience functions

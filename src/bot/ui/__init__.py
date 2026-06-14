@@ -1,7 +1,6 @@
 from src.bot.ui.texts import (
     role_label,
     campaign_type_label,
-    voting_type_label,
     submission_status_meta,
     submission_status_line,
     format_ttl_minutes,
@@ -15,7 +14,6 @@ from src.bot.ui.texts import (
 __all__ = [
     "role_label",
     "campaign_type_label",
-    "voting_type_label",
     "submission_status_meta",
     "submission_status_line",
     "format_ttl_minutes",

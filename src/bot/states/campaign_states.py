@@ -7,7 +7,6 @@ class CampaignCreationStates(StatesGroup):
     waiting_for_title = State()
     waiting_for_type = State()
     waiting_for_p2p_reviews = State()
-    waiting_for_voting_type = State()
     waiting_for_min_score = State()
     waiting_for_max_score = State()
     waiting_for_ttl = State()
@@ -24,9 +23,3 @@ class SubmissionStates(StatesGroup):
     waiting_for_campaign = State()
     waiting_for_submission = State()
     confirming_submission = State()
-
-
-class OrganizerSessionState(StatesGroup):
-    """FSM states for organizer session management workflow."""
-    creating_session = State()
-    awaiting_session_name = State()

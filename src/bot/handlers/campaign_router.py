@@ -58,7 +58,7 @@ from src.bot.keyboards import (
     build_finish_campaign_confirmation_keyboard,
     get_keyboard_for_user,
 )
-from src.bot.ui import campaign_type_label, format_ttl_minutes, submission_status_meta, voting_type_label
+from src.bot.ui import campaign_type_label, format_ttl_minutes, submission_status_meta
 
 
 # Create router
@@ -437,13 +437,6 @@ def _build_p2p_reviews_keyboard():
     ])
 
 
-def _build_voting_type_keyboard():
-    return _build_inline_keyboard([
-        [("👍 Лайк", "vote_type_like")],
-        [("⭐ Оценка", "vote_type_score")],
-    ])
-
-
 def _build_anonymous_keyboard():
     return _build_inline_keyboard([
         [(BTN_ANON_YES, "cam_anon_yes"), (BTN_ANON_NO, "cam_anon_no")],
@@ -492,6 +485,9 @@ async def btn_create_campaign(message: types.Message, state: FSMContext):
 @router.message(StateFilter(CampaignCreationStates.waiting_for_title))
 async def process_campaign_title(message: types.Message, state: FSMContext):
     """Process campaign title input."""
+    if not message.text:
+        await message.answer("⚠️ Пожалуйста, введите название кампании текстовым сообщением.")
+        return
     title = message.text.strip()
 
     if len(title) < 3:
@@ -513,7 +509,7 @@ async def process_campaign_title(message: types.Message, state: FSMContext):
 
     # Show campaign types
     builder = InlineKeyboardBuilder()
-    for ctype in CampaignType:
+    for ctype in (CampaignType.EXPERT, CampaignType.P2P):
         builder.add(types.InlineKeyboardButton(
             text=get_campaign_type_display(ctype),
             callback_data=f"ctype_{ctype.value}"
@@ -545,7 +541,6 @@ async def process_campaign_type_message(message: types.Message, state: FSMContex
     StateFilter(
         CampaignCreationStates.waiting_for_type,
         CampaignCreationStates.waiting_for_p2p_reviews,
-        CampaignCreationStates.waiting_for_voting_type,
         CampaignCreationStates.waiting_for_min_score,
         CampaignCreationStates.waiting_for_max_score,
         CampaignCreationStates.waiting_for_ttl,
@@ -578,11 +573,9 @@ async def process_campaign_type_callback(callback: types.CallbackQuery, state: F
     except ValueError:
         await callback.answer("❌ Неизвестный тип кампании", show_alert=True)
         return
-
     await state.update_data(
         campaign_type=campaign_type.value,
         p2p_reviews_required=3,
-        voting_type=None,
     )
     logger.debug(f"Campaign type selected: {campaign_type}")
 
@@ -594,16 +587,6 @@ async def process_campaign_type_callback(callback: types.CallbackQuery, state: F
             parse_mode="HTML",
         )
         await state.set_state(CampaignCreationStates.waiting_for_p2p_reviews)
-        await callback.answer()
-        return
-
-    if campaign_type == CampaignType.VOTING:
-        await callback.message.answer(
-            "🗳 <b>Выберите тип голосования:</b>",
-            reply_markup=_build_voting_type_keyboard(),
-            parse_mode="HTML",
-        )
-        await state.set_state(CampaignCreationStates.waiting_for_voting_type)
         await callback.answer()
         return
 
@@ -648,9 +631,9 @@ async def process_p2p_reviews_callback(callback: types.CallbackQuery, state: FSM
 @router.message(StateFilter(CampaignCreationStates.waiting_for_p2p_reviews))
 async def process_p2p_reviews_message(message: types.Message, state: FSMContext):
     reviews_required = _parse_choice(message.text)
-    if reviews_required is None or reviews_required <= 0:
+    if reviews_required is None or not (1 <= reviews_required <= 100):
         await message.answer(
-            "❌ Введите целое число больше 0 или выберите кнопку.",
+            "❌ Введите целое число от 1 до 100 или выберите кнопку.",
             reply_markup=_build_p2p_reviews_keyboard(),
         )
         return
@@ -664,50 +647,6 @@ async def process_p2p_reviews_message(message: types.Message, state: FSMContext)
         parse_mode="HTML",
     )
     await state.set_state(CampaignCreationStates.waiting_for_min_score)
-
-
-@router.callback_query(StateFilter(CampaignCreationStates.waiting_for_voting_type))
-async def process_voting_type_callback(callback: types.CallbackQuery, state: FSMContext):
-    if not callback.data or not callback.data.startswith("vote_type_"):
-        await callback.answer()
-        return
-
-    voting_type = callback.data.removeprefix("vote_type_")
-    if voting_type not in {"like", "score"}:
-        await callback.answer("Неизвестный тип", show_alert=True)
-        return
-
-    await state.update_data(voting_type=voting_type)
-
-    if voting_type == "like":
-        await state.update_data(min_score=1, max_score=1)
-        await callback.message.edit_text(
-            "⏱ <b>Введите время голосования (в минутах):</b>\n"
-            "Можно нажать кнопку под сообщением или ввести число минут вручную.",
-            reply_markup=_build_ttl_keyboard(),
-            parse_mode="HTML",
-        )
-        await state.set_state(CampaignCreationStates.waiting_for_ttl)
-        await callback.answer()
-        return
-
-    await callback.message.edit_text(
-        "📊 <b>Введите минимальный балл:</b>\n"
-        "Можно нажать кнопку под сообщением или ввести число вручную.",
-        reply_markup=_build_min_score_keyboard(),
-        parse_mode="HTML",
-    )
-    await state.set_state(CampaignCreationStates.waiting_for_min_score)
-    await callback.answer()
-
-
-@router.message(StateFilter(CampaignCreationStates.waiting_for_voting_type))
-async def process_voting_type_message(message: types.Message):
-    await message.answer(
-        "🗳 <b>Выберите тип голосования кнопкой ниже:</b>",
-        reply_markup=_build_voting_type_keyboard(),
-        parse_mode="HTML",
-    )
 
 
 @router.callback_query(StateFilter(CampaignCreationStates.waiting_for_min_score))
@@ -1100,7 +1039,6 @@ async def process_campaign_anonymous_callback(callback: types.CallbackQuery, sta
                 campaign_deadline_at=campaign_deadline_at,
                 is_expert_anon=is_anon,
                 p2p_reviews_required=data.get("p2p_reviews_required", 3),
-                voting_type=data.get("voting_type"),
                 organizer_id=tg_id,
                 submission_format=SubmissionFormat(
                     data.get("submission_format", SubmissionFormat.DOCUMENT.value)
@@ -1127,12 +1065,8 @@ async def process_campaign_anonymous_callback(callback: types.CallbackQuery, sta
             extra_lines = ""
             if campaign.type == CampaignType.P2P:
                 extra_lines += f"\n👥 Проверок на участника: {campaign.p2p_reviews_required}"
-            if campaign.type == CampaignType.VOTING:
-                extra_lines += f"\n🗳 Тип голосования: {voting_type_label(campaign.voting_type)}"
 
             score_line = f"📈 Баллы: {campaign.min_score} - {campaign.max_score}\n"
-            if campaign.type == CampaignType.VOTING and campaign.voting_type == "like":
-                score_line = "📈 Голос: 👍 Лайк\n"
 
             await state.clear()
             await callback.message.edit_text(
@@ -1189,7 +1123,6 @@ async def process_anonymous_message(message: types.Message, state: FSMContext):
                 campaign_deadline_at=campaign_deadline_at,
                 is_expert_anon=is_anon,
                 p2p_reviews_required=data.get("p2p_reviews_required", 3),
-                voting_type=data.get("voting_type"),
                 organizer_id=tg_id,
                 session=session,
                 submission_format=SubmissionFormat(
@@ -1215,12 +1148,8 @@ async def process_anonymous_message(message: types.Message, state: FSMContext):
             extra_lines = ""
             if campaign.type == CampaignType.P2P:
                 extra_lines += f"\n👥 Проверок на участника: {campaign.p2p_reviews_required}"
-            if campaign.type == CampaignType.VOTING:
-                extra_lines += f"\n🗳 Тип голосования: {voting_type_label(campaign.voting_type)}"
 
             score_line = f"📈 Баллы: {campaign.min_score} - {campaign.max_score}\n"
-            if campaign.type == CampaignType.VOTING and campaign.voting_type == "like":
-                score_line = "📈 Голос: 👍 Лайк\n"
             await state.clear()
             await message.answer(
                 "✅ <b>Кампания создана!</b>\n\n"
@@ -1286,14 +1215,9 @@ async def cmd_campaigns(message: types.Message):
             deadline_text = deadline.strftime('%d.%m.%Y %H:%M') if deadline else "не задан"
             text += f"{i}. <b>{campaign.title}</b>\n"
             text += f"   📊 Тип: {get_campaign_type_display(campaign.type)}\n"
-            if campaign.type == CampaignType.VOTING and campaign.voting_type == "like":
-                text += "   📈 Голос: 👍 Лайк\n"
-            else:
-                text += f"   📈 Баллы: {campaign.min_score} - {campaign.max_score}\n"
+            text += f"   📈 Баллы: {campaign.min_score} - {campaign.max_score}\n"
             if campaign.type == CampaignType.P2P:
                 text += f"   👥 Проверок на участника: {campaign.p2p_reviews_required}\n"
-            if campaign.type == CampaignType.VOTING:
-                text += f"   🗳 Тип голосования: {voting_type_label(campaign.voting_type)}\n"
             text += (
                 f"   🧾 Критерии: "
                 f"{_criteria_summary_text(CampaignService.deserialize_criteria(campaign.criteria_text))}\n"
@@ -1365,14 +1289,9 @@ async def cmd_my_campaigns(message: types.Message):
             deadline_text = deadline.strftime('%d.%m.%Y %H:%M') if deadline else "не задан"
             text += f"{i}. <b>{campaign.title}</b> {status}\n"
             text += f"   📊 Тип: {get_campaign_type_display(campaign.type)}\n"
-            if campaign.type == CampaignType.VOTING and campaign.voting_type == "like":
-                text += "   📈 Голос: 👍 Лайк\n"
-            else:
-                text += f"   📈 Баллы: {campaign.min_score} - {campaign.max_score}\n"
+            text += f"   📈 Баллы: {campaign.min_score} - {campaign.max_score}\n"
             if campaign.type == CampaignType.P2P:
                 text += f"   👥 Проверок на участника: {campaign.p2p_reviews_required}\n"
-            if campaign.type == CampaignType.VOTING:
-                text += f"   🗳 Тип голосования: {voting_type_label(campaign.voting_type)}\n"
             text += f"   📥 Формат сдачи: {_submission_format_label(campaign.submission_format)}\n"
             text += (
                 f"   ♻️ Замена до проверки: "
@@ -1856,7 +1775,6 @@ async def submission_confirm(callback: types.CallbackQuery, state: FSMContext):
                 await state.clear()
                 await callback.answer()
                 return
-
             action, existing_submission, error_message = await check_submission_availability(
                 campaign, tg_id, session
             )
@@ -1883,20 +1801,34 @@ async def submission_confirm(callback: types.CallbackQuery, state: FSMContext):
                         await callback.answer()
                         return
 
-                    pending_submission_id = existing_submission.id
+                    submission = await replace_submission_content(
+                        submission=existing_submission,
+                        submission_type=payload["submission_type"],
+                        file_id=payload.get("file_id"),
+                        file_name=payload.get("file_name"),
+                        mime_type=payload.get("mime_type"),
+                        text_content=payload.get("text_content"),
+                        external_url=payload.get("external_url"),
+                        session=session,
+                    )
                 else:
-                    pending_submission_id = None
-
-                await state.update_data(
-                    pending_submission_payload=payload,
-                    pending_submission_action=submission_action or action,
-                    pending_existing_submission_id=pending_submission_id,
-                )
+                    submission = await create_submission(
+                        campaign_id=campaign_id,
+                        author_id=tg_id,
+                        submission_type=payload["submission_type"],
+                        file_id=payload.get("file_id"),
+                        file_name=payload.get("file_name"),
+                        mime_type=payload.get("mime_type"),
+                        text_content=payload.get("text_content"),
+                        external_url=payload.get("external_url"),
+                        session=session,
+                    )
 
                 await callback.message.answer(
-                    "🧑‍🤝‍🧑 <b>P2P-кампания требует обязательных взаимных проверок.</b>\n\n"
-                    "Перед публикацией вашей работы нужно проверить чужие работы."
-                    " После завершения обязательного этапа работа будет сохранена автоматически.",
+                    "✅ <b>Работа сохранена в P2P-кампании.</b>\n\n"
+                    f"🆔 Работа: <code>{submission.id}</code>\n"
+                    "Чтобы завершить сдачу, проверьте требуемое число чужих работ. "
+                    "Загружать свою работу повторно не потребуется.",
                     parse_mode="HTML",
                 )
                 should_clear_state = False
@@ -1906,9 +1838,7 @@ async def submission_confirm(callback: types.CallbackQuery, state: FSMContext):
                     state,
                     campaign,
                     tg_id,
-                    payload,
-                    submission_action or action,
-                    pending_submission_id,
+                    submission.id,
                 )
                 return
 
@@ -2011,7 +1941,7 @@ async def cmd_my_submissions(message: types.Message):
             return
 
         text = "📎 <b>Ваши работы:</b>\n\n"
-        for i, (submission, campaign_title, review) in enumerate(submissions, 1):
+        for i, (submission, campaign, review) in enumerate(submissions, 1):
             _, status_label, _ = submission_status_meta(submission.status)
 
             if review is None:
@@ -2029,8 +1959,34 @@ async def cmd_my_submissions(message: types.Message):
                 )
                 review_result = f"🧾 Результат: {score_text}\n   💬 Комментарий: {comment_text}"
 
-            text += f"{i}. <b>{escape(campaign_title)}</b>\n"
+            text += f"{i}. <b>{escape(campaign.title)}</b>\n"
             text += f"   📊 Статус: {status_label}\n"
+            if campaign.type == CampaignType.P2P:
+                outgoing_count = await session.scalar(
+                    select(func.count(Review.id))
+                    .join(Submission, Review.submission_id == Submission.id)
+                    .where(
+                        Review.reviewer_id == tg_id,
+                        Submission.campaign_id == campaign.id,
+                    )
+                )
+                incoming_count = await session.scalar(
+                    select(func.count(Review.id)).where(
+                        Review.submission_id == submission.id
+                    )
+                )
+                p2p_status = (
+                    "✅ завершён"
+                    if submission.p2p_completed_at is not None
+                    else "⏳ требуется продолжить"
+                )
+                text += (
+                    f"   👥 P2P-этап: {p2p_status}\n"
+                    f"   ↗️ Проверено вами: "
+                    f"{outgoing_count or 0}/{campaign.p2p_reviews_required}\n"
+                    f"   ↙️ Получено рецензий: "
+                    f"{incoming_count or 0}/{campaign.p2p_reviews_required}\n"
+                )
             text += f"   {review_result}\n\n"
 
         await message.answer(text, parse_mode="HTML")

@@ -7,11 +7,13 @@ POSTGRES_DB="${POSTGRES_DB:-telegram_task_checker}"
 POSTGRES_HOST="${POSTGRES_HOST:-127.0.0.1}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 PGDATA="${PGDATA:-/var/lib/postgresql/data}"
+START_LOCAL_POSTGRES="${START_LOCAL_POSTGRES:-true}"
 
 REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
 REDIS_PORT="${REDIS_PORT:-6379}"
 REDIS_DB="${REDIS_DB:-0}"
 REDIS_PASSWORD="${REDIS_PASSWORD:-}"
+START_LOCAL_REDIS="${START_LOCAL_REDIS:-true}"
 
 export POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB POSTGRES_HOST POSTGRES_PORT PGDATA
 export REDIS_HOST REDIS_PORT REDIS_DB REDIS_PASSWORD
@@ -169,11 +171,11 @@ if [ -z "${REDIS_URL:-}" ]; then
   fi
 fi
 
-if is_local_host "$POSTGRES_HOST"; then
+if [ "$START_LOCAL_POSTGRES" = "true" ] && is_local_host "$POSTGRES_HOST"; then
   start_local_postgres
 fi
 
-if is_local_host "$REDIS_HOST"; then
+if [ "$START_LOCAL_REDIS" = "true" ] && is_local_host "$REDIS_HOST"; then
   start_local_redis
 fi
 

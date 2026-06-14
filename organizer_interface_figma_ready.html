@@ -1386,7 +1386,7 @@
                   <div>
                     <div class="stat-title">Активных кампаний</div>
                     <div class="stat-value" id="statActiveCampaigns">0</div>
-                    <div class="stat-hint">Экспертные, P2P и голосования</div>
+                    <div class="stat-hint">Экспертные и P2P-кампании</div>
                   </div>
                   <div class="icon-box icon-blue">☷</div>
                 </div>
@@ -1525,7 +1525,6 @@
                       <select class="select" name="type">
                         <option value="expert">Экспертная проверка</option>
                         <option value="p2p">Взаимопроверка P2P</option>
-                        <option value="voting">Голосование</option>
                       </select>
                     </label>
 
@@ -2164,11 +2163,11 @@
           progress: 0,
           queued: 0,
           reviewed: 0,
-          experts: payload.type === "voting" ? 0 : 1,
+          experts: 1,
           avgScore: 0,
           completed: false,
           isActive: true,
-          votingType: payload.type === "voting" ? "likes" : null,
+          votingType: null,
           ...payload,
         };
         mockDb.campaigns.unshift(newCampaign);

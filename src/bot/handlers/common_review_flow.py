@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import html
+
 from aiogram import types
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -19,14 +21,16 @@ async def send_submission_content(
     if submission_type == SubmissionFormat.TEXT:
         text_body = (submission.text_content or "").strip() or "—"
         await message.answer(
-            f"{caption}\n\n📝 <b>Текст работы:</b>\n<blockquote>{text_body}</blockquote>",
+            f"{caption}\n\n📝 <b>Текст работы:</b>\n"
+            f"<blockquote>{html.escape(text_body)}</blockquote>",
             parse_mode="HTML",
         )
         return
 
     if submission_type == SubmissionFormat.LINK:
         await message.answer(
-            f"{caption}\n\n🔗 <b>Ссылка:</b>\n{submission.external_url or '—'}",
+            f"{caption}\n\n🔗 <b>Ссылка:</b>\n"
+            f"{html.escape(submission.external_url or '—')}",
             parse_mode="HTML",
             disable_web_page_preview=True,
         )
@@ -62,9 +66,12 @@ async def send_submission_content(
         if submission_type == SubmissionFormat.LINK and submission.external_url:
             fallback += f"\n🔗 Ссылка: {submission.external_url}"
         elif submission_type == SubmissionFormat.TEXT and submission.text_content:
-            fallback += f"\n📝 Текст:\n<blockquote>{submission.text_content}</blockquote>"
+            fallback += (
+                f"\n📝 Текст:\n<blockquote>"
+                f"{html.escape(submission.text_content)}</blockquote>"
+            )
         elif submission.file_name:
-            fallback += f"\n📄 Файл: <b>{submission.file_name}</b>"
+            fallback += f"\n📄 Файл: <b>{html.escape(submission.file_name)}</b>"
         await message.answer(fallback, parse_mode="HTML")
 
 def build_confirm_cancel_keyboard(
@@ -106,7 +113,7 @@ def format_comment_saved_text(
     """Format a generic message after text comment was saved."""
     return (
         "💬 <b>Комментарий сохранён.</b>\n\n"
-        f"Текст: {comment_text}\n\n"
+        f"Текст: {html.escape(comment_text)}\n\n"
         f"{next_step_text}"
     )
 
@@ -125,7 +132,9 @@ def format_criteria_scores_block(
         if not criterion_name or criterion_score in (None, ""):
             continue
 
-        lines.append(f"• {criterion_name} — {criterion_score}")
+        lines.append(
+            f"• {html.escape(criterion_name)} — {html.escape(str(criterion_score))}"
+        )
 
     if not lines:
         return ""
@@ -149,7 +158,7 @@ def format_review_saved_summary(
 
     text += (
         f"⭐ Итоговая оценка: <b>{score}</b>\n"
-        f"💬 Комментарий: <b>{comment_summary}</b>"
+        f"💬 Комментарий: <b>{html.escape(comment_summary)}</b>"
     )
 
     if extra_text:

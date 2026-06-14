@@ -49,7 +49,6 @@ EXPORT_BASE_HEADERS = [
 CAMPAIGN_TYPE_LABELS = {
     "expert": "Экспертная проверка",
     "p2p": "Взаимопроверка",
-    "voting": "Голосование",
 }
 
 SUBMISSION_STATUS_LABELS = {

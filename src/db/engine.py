@@ -132,12 +132,6 @@ async def _ensure_schema(conn) -> None:
     await conn.execute(
         text(
             "ALTER TABLE campaigns "
-            "ADD COLUMN IF NOT EXISTS voting_type VARCHAR(20)"
-        )
-    )
-    await conn.execute(
-        text(
-            "ALTER TABLE campaigns "
             "ADD COLUMN IF NOT EXISTS campaign_deadline_at TIMESTAMPTZ"
         )
     )
@@ -166,6 +160,55 @@ async def _ensure_schema(conn) -> None:
         text(
             "ALTER TABLE reviews "
             "ADD COLUMN IF NOT EXISTS criteria_scores TEXT"
+        )
+    )
+    await conn.execute(
+        text(
+            "ALTER TABLE submissions "
+            "ADD COLUMN IF NOT EXISTS p2p_completed_at TIMESTAMPTZ"
+        )
+    )
+    await conn.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_submissions_p2p_completed_at "
+            "ON submissions (p2p_completed_at)"
+        )
+    )
+    await conn.execute(
+        text(
+            """
+            DELETE FROM reviews duplicate
+            USING reviews original
+            WHERE duplicate.submission_id = original.submission_id
+              AND duplicate.reviewer_id = original.reviewer_id
+              AND duplicate.id > original.id
+            """
+        )
+    )
+    await conn.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_reviews_submission_reviewer "
+            "ON reviews (submission_id, reviewer_id)"
+        )
+    )
+    await conn.execute(
+        text(
+            """
+            UPDATE submissions AS submission
+            SET p2p_completed_at = COALESCE(submission.updated_at, submission.created_at)
+            FROM campaigns AS campaign
+            WHERE submission.campaign_id = campaign.id
+              AND campaign.type = 'P2P'
+              AND submission.p2p_completed_at IS NULL
+              AND (
+                    SELECT COUNT(*)
+                    FROM reviews AS review
+                    JOIN submissions AS reviewed_submission
+                      ON reviewed_submission.id = review.submission_id
+                    WHERE review.reviewer_id = submission.author_id
+                      AND reviewed_submission.campaign_id = submission.campaign_id
+                  ) >= campaign.p2p_reviews_required
+            """
         )
     )
 

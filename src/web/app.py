@@ -48,8 +48,7 @@ class CampaignCreatePayload(BaseModel):
     ttl_minutes: int = 1440
     campaign_deadline_at: datetime | None = None
     is_expert_anon: bool = False
-    p2p_reviews_required: int = 3
-    voting_type: str | None = None
+    p2p_reviews_required: int = Field(default=3, ge=1, le=100)
     submission_format: SubmissionFormat = SubmissionFormat.DOCUMENT
     allowed_extensions: str | None = None
     criteria_text: str | None = None
@@ -83,8 +82,7 @@ class CampaignUpdatePayload(BaseModel):
     ttl_minutes: int | None = None
     campaign_deadline_at: datetime | None = None
     is_expert_anon: bool | None = None
-    p2p_reviews_required: int | None = None
-    voting_type: str | None = None
+    p2p_reviews_required: int | None = Field(default=None, ge=1, le=100)
     submission_format: SubmissionFormat | None = None
     allowed_extensions: str | None = None
     criteria_text: str | None = None
@@ -126,6 +124,7 @@ class DashboardCampaignCard(BaseModel):
     deadline_at: str | None
     queue_count: int
     reviewed_count: int
+    p2p_pending_count: int
     completion_percent: int
 
 class DashboardResponse(BaseModel):
@@ -143,7 +142,6 @@ class CampaignListItem(BaseModel):
     campaign_deadline_at: str | None
     is_expert_anon: bool
     p2p_reviews_required: int
-    voting_type: str | None
     allowed_extensions: str | None
     criteria_text: str | None
     allow_resubmission_after_review: bool
@@ -154,6 +152,7 @@ class CampaignListItem(BaseModel):
     submissions_total: int
     queue_count: int
     reviewed_count: int
+    p2p_pending_count: int
     average_score: float | None
 
 class UserListItem(BaseModel):
@@ -232,7 +231,6 @@ def build_campaign_item(payload: dict[str, Any]) -> CampaignListItem:
         campaign_deadline_at=serialize_dt(payload["campaign_deadline_at"]),
         is_expert_anon=payload["is_expert_anon"],
         p2p_reviews_required=payload["p2p_reviews_required"],
-        voting_type=payload["voting_type"],
         allowed_extensions=payload["allowed_extensions"],
         criteria_text=payload["criteria_text"],
         allow_resubmission_after_review=payload["allow_resubmission_after_review"],
@@ -243,6 +241,7 @@ def build_campaign_item(payload: dict[str, Any]) -> CampaignListItem:
         submissions_total=payload["submissions_total"] or 0,
         queue_count=payload["queue_count"] or 0,
         reviewed_count=payload["reviewed_count"] or 0,
+        p2p_pending_count=payload.get("p2p_pending_count") or 0,
         average_score=round(float(payload["average_score"]), 2) if payload["average_score"] is not None else None,
     )
 
@@ -401,6 +400,17 @@ async def get_dashboard(access_token: str, session: DbSession) -> DashboardRespo
             func.sum(
                 case((Submission.status == SubmissionStatus.REVIEWED, 1), else_=0)
             ).label("reviewed_count"),
+            func.sum(
+                case(
+                    (
+                        Submission.id.is_not(None)
+                        & (Campaign.type == CampaignType.P2P)
+                        & Submission.p2p_completed_at.is_(None),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label("p2p_pending_count"),
         )
         .outerjoin(Submission, Submission.campaign_id == Campaign.id)
         .group_by(Campaign.id)
@@ -432,6 +442,7 @@ async def get_dashboard(access_token: str, session: DbSession) -> DashboardRespo
                 deadline_at=serialize_dt(row["campaign_deadline_at"]),
                 queue_count=row["queue_count"] or 0,
                 reviewed_count=row["reviewed_count"] or 0,
+                p2p_pending_count=row["p2p_pending_count"] or 0,
                 completion_percent=campaign_completion_percent(
                     row["submissions_total"] or 0,
                     row["reviewed_count"] or 0,
@@ -457,7 +468,6 @@ async def get_campaigns(access_token: str, session: DbSession) -> list[CampaignL
             Campaign.campaign_deadline_at,
             Campaign.is_expert_anon,
             Campaign.p2p_reviews_required,
-            Campaign.voting_type,
             Campaign.allowed_extensions,
             Campaign.criteria_text,
             Campaign.allow_resubmission_after_review,
@@ -465,14 +475,37 @@ async def get_campaigns(access_token: str, session: DbSession) -> list[CampaignL
             Campaign.is_active,
             Campaign.created_at,
             Campaign.updated_at,
-            func.count(Submission.id).label("submissions_total"),
-            func.sum(
-                case(
-                    (Submission.status.in_([SubmissionStatus.UPLOADED, SubmissionStatus.IN_REVIEW]), 1),
-                    else_=0,
+            func.count(func.distinct(Submission.id)).label("submissions_total"),
+            func.count(
+                func.distinct(
+                    case(
+                        (
+                            Submission.status.in_(
+                                [SubmissionStatus.UPLOADED, SubmissionStatus.IN_REVIEW]
+                            ),
+                            Submission.id,
+                        )
+                    )
                 )
             ).label("queue_count"),
-            func.sum(case((Submission.status == SubmissionStatus.REVIEWED, 1), else_=0)).label("reviewed_count"),
+            func.count(
+                func.distinct(
+                    case(
+                        (Submission.status == SubmissionStatus.REVIEWED, Submission.id)
+                    )
+                )
+            ).label("reviewed_count"),
+            func.count(
+                func.distinct(
+                    case(
+                        (
+                            (Campaign.type == CampaignType.P2P)
+                            & Submission.p2p_completed_at.is_(None),
+                            Submission.id,
+                        )
+                    )
+                )
+            ).label("p2p_pending_count"),
             func.avg(Review.score).label("average_score"),
         )
         .outerjoin(Submission, Submission.campaign_id == Campaign.id)
@@ -496,7 +529,6 @@ async def create_campaign(access_token: str, payload: CampaignCreatePayload, ses
         campaign_deadline_at=payload.campaign_deadline_at,
         is_expert_anon=payload.is_expert_anon,
         p2p_reviews_required=payload.p2p_reviews_required,
-        voting_type=payload.voting_type,
         submission_format=payload.submission_format,
         allowed_extensions=payload.allowed_extensions,
         criteria_text=payload.criteria_text,
@@ -520,7 +552,6 @@ async def create_campaign(access_token: str, payload: CampaignCreatePayload, ses
             "campaign_deadline_at": campaign.campaign_deadline_at,
             "is_expert_anon": campaign.is_expert_anon,
             "p2p_reviews_required": campaign.p2p_reviews_required,
-            "voting_type": campaign.voting_type,
             "allowed_extensions": campaign.allowed_extensions,
             "criteria_text": campaign.criteria_text,
             "allow_resubmission_after_review": campaign.allow_resubmission_after_review,
@@ -531,6 +562,7 @@ async def create_campaign(access_token: str, payload: CampaignCreatePayload, ses
             "submissions_total": 0,
             "queue_count": 0,
             "reviewed_count": 0,
+            "p2p_pending_count": 0,
             "average_score": None,
         }
     )
@@ -552,6 +584,17 @@ async def update_campaign(
         new_max = changes.get("max_score", campaign.max_score)
         if new_max < new_min:
             raise HTTPException(status_code=422, detail="max_score cannot be less than min_score")
+    if "p2p_reviews_required" in changes:
+        submissions_exist = await session.scalar(
+            select(func.count(Submission.id)).where(
+                Submission.campaign_id == campaign.id
+            )
+        )
+        if submissions_exist:
+            raise HTTPException(
+                status_code=409,
+                detail="P2P review requirement cannot change after submissions exist",
+            )
 
     for field_name, value in changes.items():
         setattr(campaign, field_name, value)
@@ -561,14 +604,33 @@ async def update_campaign(
 
     metrics_stmt = (
         select(
-            func.count(Submission.id).label("submissions_total"),
-            func.sum(
-                case(
-                    (Submission.status.in_([SubmissionStatus.UPLOADED, SubmissionStatus.IN_REVIEW]), 1),
-                    else_=0,
+            func.count(func.distinct(Submission.id)).label("submissions_total"),
+            func.count(
+                func.distinct(
+                    case(
+                        (
+                            Submission.status.in_(
+                                [SubmissionStatus.UPLOADED, SubmissionStatus.IN_REVIEW]
+                            ),
+                            Submission.id,
+                        )
+                    )
                 )
             ).label("queue_count"),
-            func.sum(case((Submission.status == SubmissionStatus.REVIEWED, 1), else_=0)).label("reviewed_count"),
+            func.count(
+                func.distinct(
+                    case(
+                        (Submission.status == SubmissionStatus.REVIEWED, Submission.id)
+                    )
+                )
+            ).label("reviewed_count"),
+            (
+                func.count(func.distinct(Submission.id)).filter(
+                    Submission.p2p_completed_at.is_(None),
+                )
+                if campaign.type == CampaignType.P2P
+                else literal(0)
+            ).label("p2p_pending_count"),
             func.avg(Review.score).label("average_score"),
         )
         .outerjoin(Review, Review.submission_id == Submission.id)
@@ -588,7 +650,6 @@ async def update_campaign(
             "campaign_deadline_at": campaign.campaign_deadline_at,
             "is_expert_anon": campaign.is_expert_anon,
             "p2p_reviews_required": campaign.p2p_reviews_required,
-            "voting_type": campaign.voting_type,
             "allowed_extensions": campaign.allowed_extensions,
             "criteria_text": campaign.criteria_text,
             "allow_resubmission_after_review": campaign.allow_resubmission_after_review,
@@ -599,6 +660,7 @@ async def update_campaign(
             "submissions_total": metrics["submissions_total"] or 0,
             "queue_count": metrics["queue_count"] or 0,
             "reviewed_count": metrics["reviewed_count"] or 0,
+            "p2p_pending_count": metrics["p2p_pending_count"] or 0,
             "average_score": metrics["average_score"],
         }
     )

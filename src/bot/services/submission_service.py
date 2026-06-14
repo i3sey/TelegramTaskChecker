@@ -90,6 +90,7 @@ class SubmissionService:
         submission.text_content = text_content
         submission.external_url = external_url
         submission.status = SubmissionStatus.UPLOADED
+        submission.p2p_completed_at = None
         await session.flush()
         logger.info(
             f"Replaced submission: id={submission.id}, "
@@ -123,7 +124,7 @@ class SubmissionService:
     async def get_user_submissions_with_review_details(
         user_id: int,
         session: AsyncSession
-    ) -> list[tuple[Submission, str, Review | None]]:
+    ) -> list[tuple[Submission, Campaign, Review | None]]:
         """
         Get all submissions by a specific user with campaign titles and latest review.
 
@@ -144,7 +145,7 @@ class SubmissionService:
         )
 
         result = await session.execute(
-            select(Submission, Campaign.title, Review)
+            select(Submission, Campaign, Review)
             .join(Campaign, Campaign.id == Submission.campaign_id)
             .outerjoin(
                 latest_review_subquery,
@@ -155,8 +156,8 @@ class SubmissionService:
             .order_by(Submission.created_at.desc(), Submission.id.desc())
         )
         return [
-            (submission, campaign_title, review)
-            for submission, campaign_title, review in result.all()
+            (submission, campaign, review)
+            for submission, campaign, review in result.all()
         ]
 
     @staticmethod
@@ -253,7 +254,31 @@ class SubmissionService:
         if submission is None:
             return "create", None, None
 
+        if (
+            campaign.type.value == "p2p"
+            and submission.status != SubmissionStatus.UPLOADED
+            and submission.p2p_completed_at is None
+        ):
+            return (
+                "forbid",
+                submission,
+                "❌ Сначала завершите обязательные P2P-проверки через /p2p.",
+            )
+
         if submission.status == SubmissionStatus.UPLOADED:
+            if campaign.type.value == "p2p":
+                review_count = await session.scalar(
+                    select(func.count(Review.id)).where(
+                        Review.submission_id == submission.id
+                    )
+                )
+                if review_count:
+                    return (
+                        "forbid",
+                        submission,
+                        "❌ Работа уже участвует в P2P-проверке и получила рецензию.\n"
+                        "Заменить её содержимое больше нельзя.",
+                    )
             if campaign.allow_resubmission_before_review:
                 return "replace", submission, None
             return (
@@ -390,7 +415,7 @@ async def get_user_submissions(user_id: int, session: AsyncSession) -> list[Subm
 async def get_user_submissions_with_review_details(
     user_id: int,
     session: AsyncSession
-) -> list[tuple[Submission, str, Review | None]]:
+) -> list[tuple[Submission, Campaign, Review | None]]:
     """Get all submissions by a user with campaign title and latest review."""
     return await SubmissionService.get_user_submissions_with_review_details(user_id, session)
 

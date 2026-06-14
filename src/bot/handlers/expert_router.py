@@ -18,7 +18,7 @@ from src.bot.services.user_service import (
 from src.bot.services.submission_service import get_submission, update_submission_status
 from src.bot.services.review_service import create_review, count_pending_submissions, get_submission_pending
 from src.bot.services.campaign_service import CampaignService, get_campaign
-from src.bot.services.queue_service import queue_service, QueueService
+from src.bot.services.queue_service import queue_service
 from src.bot.services.notification_service import NotificationService
 from src.bot.services.voice_transcription_service import (
     VoiceTranscriptionError,
@@ -34,10 +34,10 @@ from src.bot.keyboards import (
     build_comment_decision_keyboard,
     build_comment_final_keyboard,
     build_comment_skip_keyboard,
-    build_ban_comment_keyboard,
     build_review_confirmation_keyboard,
     build_voice_comment_action_keyboard,
     build_transcribed_comment_keyboard,
+    build_post_review_keyboard,
     get_keyboard_for_role,
 )
 from src.bot.ui import format_ttl_minutes
@@ -45,6 +45,7 @@ from src.bot.handlers.common_review_flow import (
     format_comment_saved_text,
     format_review_saved_summary,
     format_score_saved_text,
+    send_submission_content,
 )
 
 
@@ -71,46 +72,30 @@ class ExpertReviewState(StatesGroup):
     waiting_for_ban_reason = State()
 
 
-def build_quick_score_keyboard() -> InlineKeyboardMarkup:
-    """Inline buttons for common score values."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="0", callback_data="score_quick_0"),
-                InlineKeyboardButton(text="20", callback_data="score_quick_20"),
-                InlineKeyboardButton(text="40", callback_data="score_quick_40"),
-            ],
-            [
-                InlineKeyboardButton(text="60", callback_data="score_quick_60"),
-                InlineKeyboardButton(text="80", callback_data="score_quick_80"),
-                InlineKeyboardButton(text="100", callback_data="score_quick_100"),
-            ],
-        ]
-    )
+def build_quick_score_keyboard(min_score: int = 0, max_score: int = 100) -> InlineKeyboardMarkup:
+    """Inline buttons for quick score selection, spread evenly across the campaign's range."""
+    # Build up to 6 unique candidate values evenly spread across [min_score, max_score]
+    span = max_score - min_score
+    if span == 0:
+        candidates = [min_score]
+    elif span <= 5:
+        candidates = list(range(min_score, max_score + 1))
+    else:
+        # 6 evenly-spaced values: min, ~20%, ~40%, ~60%, ~80%, max
+        steps = 5
+        candidates = sorted(set(
+            round(min_score + i * span / steps) for i in range(steps + 1)
+        ))
 
-
-def get_score_keyboard(min_score: int, max_score: int) -> InlineKeyboardMarkup:
-    """Generate inline keyboard for score selection."""
-    buttons = []
-    step = max(1, (max_score - min_score) // 5)
-    current = min_score
-
-    while current <= max_score:
-        row = []
-        for _ in range(min(3, max_score - current + 1)):
-            row.append(InlineKeyboardButton(
-                text=str(current),
-                callback_data=f"score_{current}"
-            ))
-            current += 1
-            if current > max_score:
-                break
+    buttons: list[list[InlineKeyboardButton]] = []
+    row: list[InlineKeyboardButton] = []
+    for value in candidates:
+        row.append(InlineKeyboardButton(text=str(value), callback_data=f"score_quick_{value}"))
+        if len(row) == 3:
+            buttons.append(row)
+            row = []
+    if row:
         buttons.append(row)
-
-    buttons.append([InlineKeyboardButton(
-        text="Отмена",
-        callback_data="cancel_review"
-    )])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -204,63 +189,6 @@ async def _has_expert_review_access(
     return bool(campaign and campaign.organizer_id == tg_id)
 
 
-async def _send_submission_content(
-    message: types.Message,
-    submission,
-    caption: str,
-) -> None:
-    submission_type = submission.submission_type or SubmissionFormat.DOCUMENT
-
-    if submission_type == SubmissionFormat.TEXT:
-        text_body = (submission.text_content or "").strip() or "—"
-        await message.answer(
-            f"{caption}\n\n📝 <b>Текст работы:</b>\n<blockquote>{text_body}</blockquote>",
-            parse_mode="HTML",
-        )
-        return
-
-    if submission_type == SubmissionFormat.LINK:
-        await message.answer(
-            f"{caption}\n\n🔗 <b>Ссылка:</b>\n{submission.external_url or '—'}",
-            parse_mode="HTML",
-            disable_web_page_preview=True,
-        )
-        return
-
-    try:
-        if submission_type == SubmissionFormat.PHOTO and submission.file_id:
-            await message.answer_photo(
-                photo=submission.file_id,
-                caption=caption,
-                parse_mode="HTML",
-            )
-            return
-
-        if submission.file_id:
-            await message.answer_document(
-                document=submission.file_id,
-                caption=caption,
-                parse_mode="HTML",
-            )
-            return
-
-        await message.answer(
-            caption + "\n\n⚠️ У работы отсутствует вложение для отправки.",
-            parse_mode="HTML",
-        )
-    except Exception as e:
-        logger.error(
-            f"Failed to send submission {submission.id} "
-            f"of type {submission_type.value}: {e}"
-        )
-        fallback = caption + "\n\n⚠️ Вложение не удалось отправить, но вы всё равно можете выставить оценку."
-        if submission_type == SubmissionFormat.LINK and submission.external_url:
-            fallback += f"\n🔗 Ссылка: {submission.external_url}"
-        elif submission_type == SubmissionFormat.TEXT and submission.text_content:
-            fallback += f"\n📝 Текст:\n<blockquote>{submission.text_content}</blockquote>"
-        elif submission.file_name:
-            fallback += f"\n📄 Файл: <b>{submission.file_name}</b>"
-        await message.answer(fallback, parse_mode="HTML")
 
 async def _prompt_for_total_score(message: types.Message, campaign: Campaign) -> None:
     """Ask expert for final score."""
@@ -270,7 +198,7 @@ async def _prompt_for_total_score(message: types.Message, campaign: Campaign) ->
     )
     await message.answer(
         "Выберите итоговую оценку кнопкой или введите вручную:",
-        reply_markup=build_quick_score_keyboard(),
+        reply_markup=build_quick_score_keyboard(campaign.min_score, campaign.max_score),
     )
 
 def _build_criteria_prompt_text(
@@ -316,7 +244,7 @@ async def _show_or_update_criteria_prompt(
                 message_id=prompt_message_id,
                 text=prompt_text,
                 parse_mode="HTML",
-                reply_markup=build_quick_score_keyboard(),
+                reply_markup=build_quick_score_keyboard(campaign.min_score, campaign.max_score),
             )
             return
         except Exception as exc:
@@ -325,7 +253,7 @@ async def _show_or_update_criteria_prompt(
     sent_message = await message.answer(
         prompt_text,
         parse_mode="HTML",
-        reply_markup=build_quick_score_keyboard(),
+        reply_markup=build_quick_score_keyboard(campaign.min_score, campaign.max_score),
     )
     await state.update_data(criteria_prompt_message_id=sent_message.message_id)
 
@@ -370,7 +298,7 @@ async def send_submission_to_expert(
         "Дальше: оцените критерии (если есть) → введите итоговую оценку → "
         "напишите комментарий → подтвердите результат."
     )
-    await _send_submission_content(message, submission, caption)
+    await send_submission_content(message, submission, caption)
 
     await _start_scoring_flow(message, state, campaign, criteria)
 
@@ -420,12 +348,12 @@ async def _try_assign_submission_to_expert(
             )
             return False
 
-        locked = await queue_service.lock_submission(
+        lock_token = await queue_service.lock_submission(
             submission_id=submission.id,
             expert_id=tg_id,
             ttl_minutes=campaign.ttl_minutes,
         )
-        if not locked:
+        if not lock_token:
             await message.answer(
                 "⚠️ Эту работу только что взял другой эксперт.\n"
                 "Нажмите /take, чтобы получить следующую.",
@@ -444,6 +372,7 @@ async def _try_assign_submission_to_expert(
         submission_id=submission.id,
         campaign_id=submission.campaign_id,
         ttl_minutes=campaign.ttl_minutes,
+        lock_token=lock_token,
     )
 
     logger.info(f"Expert {tg_id} took submission {submission.id} (TTL: {campaign.ttl_minutes}m)")
@@ -510,10 +439,12 @@ async def _deliver_current_submission(
             return False
 
     await state.set_state(ExpertReviewState.reviewing_submission)
+    lock_info = await queue_service.get_lock_info(submission.id)
     await state.update_data(
         submission_id=submission.id,
         campaign_id=submission.campaign_id,
         ttl_minutes=campaign.ttl_minutes,
+        lock_token=lock_info.get("token") if lock_info else None,
         campaign_criteria=CampaignService.deserialize_criteria(campaign.criteria_text),
         criteria_scores=[],
         criteria_index=0,
@@ -695,6 +626,7 @@ async def handle_confirm_return_review(
     tg_id = callback.from_user.id
     data = await state.get_data()
     submission_id = data.get("submission_id")
+    lock_token = data.get("lock_token")
 
     if not submission_id:
         await callback.answer("Работа для возврата не найдена", show_alert=True)
@@ -707,7 +639,14 @@ async def handle_confirm_return_review(
 
     logger.info(f"Expert {tg_id} returning submission {submission_id}")
 
-    await queue_service.unlock_submission(submission_id)
+    if not lock_token or not await queue_service.unlock_submission(
+        submission_id,
+        expert_id=tg_id,
+        lock_token=lock_token,
+    ):
+        await callback.answer("Блокировка работы уже истекла", show_alert=True)
+        await state.clear()
+        return
 
     async with session_scope() as session:
         await update_submission_status(
@@ -970,9 +909,20 @@ async def handle_confirm_callback(callback: types.CallbackQuery, state: FSMConte
     voice_file_id = data.get("voice_file_id")
     comment_mode = data.get("comment_mode")
     criteria_scores = data.get("criteria_scores")
+    lock_token = data.get("lock_token")
 
     if not submission_id or score is None:
         await callback.answer("Сначала выберите оценку", show_alert=True)
+        return
+    lock_info = await queue_service.get_lock_info(submission_id)
+    if (
+        not lock_token
+        or not lock_info
+        or lock_info.get("expert_id") != tg_id
+        or lock_info.get("token") != lock_token
+    ):
+        await callback.answer("Время проверки истекло", show_alert=True)
+        await state.clear()
         return
 
     if comment_text == "пропустить":
@@ -1034,7 +984,13 @@ async def handle_confirm_callback(callback: types.CallbackQuery, state: FSMConte
         )
         return
 
-    await queue_service.unlock_submission(submission_id)
+    lock_token = data.get("lock_token")
+    if lock_token:
+        await queue_service.unlock_submission(
+            submission_id,
+            expert_id=tg_id,
+            lock_token=lock_token,
+        )
     await state.clear()
 
     async with session_scope() as session:
@@ -1076,8 +1032,14 @@ async def handle_cancel_callback(callback: types.CallbackQuery, state: FSMContex
 
     data = await state.get_data()
     submission_id = data.get("submission_id")
+    lock_token = data.get("lock_token")
     if submission_id:
-        await queue_service.unlock_submission(submission_id)
+        if lock_token:
+            await queue_service.unlock_submission(
+                submission_id,
+                expert_id=callback.from_user.id,
+                lock_token=lock_token,
+            )
         async with session_scope() as session:
             await update_submission_status(
                 submission_id,
@@ -1314,14 +1276,6 @@ async def handle_score_proceed_ban(callback: types.CallbackQuery, state: FSMCont
     )
 
 
-@router.callback_query(F.data == "skip_criteria")
-async def handle_skip_criteria(callback: types.CallbackQuery, state: FSMContext) -> None:
-    """Keep backward compatibility with old inline buttons."""
-    await callback.answer(
-        "Пропуск критериев отключён. Нужно оценить каждый критерий.",
-        show_alert=True,
-    )
-
 @router.callback_query(F.data == "comment_skip")
 async def handle_comment_skip(callback: types.CallbackQuery, state: FSMContext) -> None:
     await state.update_data(
@@ -1358,33 +1312,6 @@ async def handle_ban_request_init(callback: types.CallbackQuery, state: FSMConte
     )
 
 
-@router.callback_query(F.data == "ban_comment_cancel")
-async def handle_ban_comment_cancel(callback: types.CallbackQuery, state: FSMContext) -> None:
-    """Handle ban reason input cancellation."""
-    await callback.answer()
-    data = await state.get_data()
-    score = data.get("score")
-    comment_text = data.get("comment_text")
-    
-    # Go back to comment decision menu
-    await state.set_state(ExpertReviewState.waiting_for_comment)
-    await callback.message.answer(
-        f"⬅️ <b>Вернулись к выбору действия</b>\n\n"
-        f"⭐ Оценка: <b>{score}</b>\n"
-        f"💬 Комментарий: {comment_text or 'Нет'}\n\n"
-        "Выберите действие с работой:",
-        parse_mode="HTML",
-        reply_markup=build_comment_final_keyboard(),
-    )
-
-
-@router.callback_query(F.data == "ban_comment_submit")
-async def handle_ban_comment_submit(callback: types.CallbackQuery, state: FSMContext) -> None:
-    """Handle ban reason submission - trigger same as text input."""
-    # This will be handled by message handler for waiting_for_ban_reason state
-    await callback.answer()
-
-
 @router.message(StateFilter(ExpertReviewState.waiting_for_ban_reason))
 async def process_ban_reason(message: types.Message, state: FSMContext, bot: Bot) -> None:
     """Process ban reason from expert."""
@@ -1397,6 +1324,7 @@ async def process_ban_reason(message: types.Message, state: FSMContext, bot: Bot
     submission_id = data.get("submission_id")
     score = data.get("score")
     comment_text = data.get("comment_text")
+    lock_token = data.get("lock_token")
     
     if not submission_id:
         await message.answer("❌ Ошибка: работа не найдена.")
@@ -1407,8 +1335,16 @@ async def process_ban_reason(message: types.Message, state: FSMContext, bot: Bot
     
     logger.info(f"Expert {tg_id} submitting ban request for submission {submission_id}: reason={ban_reason}")
     
-    # Unlock from Redis
-    await queue_service.unlock_submission(submission_id)
+    lock_info = await queue_service.get_lock_info(submission_id)
+    if (
+        not lock_token
+        or not lock_info
+        or lock_info.get("expert_id") != tg_id
+        or lock_info.get("token") != lock_token
+    ):
+        await message.answer("⏰ Время проверки истекло. Возьмите работу заново.")
+        await state.clear()
+        return
     
     # Save review with ban_comment to DB
     async with session_scope() as session:
@@ -1433,6 +1369,12 @@ async def process_ban_reason(message: types.Message, state: FSMContext, bot: Bot
         campaign = await get_campaign(submission.campaign_id, session)
         author = await get_user(tg_id=submission.author_id, session=session)
         reviewer = await get_user(tg_id=tg_id, session=session)
+
+    await queue_service.unlock_submission(
+        submission_id,
+        expert_id=tg_id,
+        lock_token=lock_token,
+    )
     
     # Send ban notification to all organizers
     ban_notification_text = (
@@ -1478,11 +1420,13 @@ async def process_ban_reason(message: types.Message, state: FSMContext, bot: Bot
     async with session_scope() as session:
         user = await get_user(tg_id=tg_id, session=session)
         reply_markup = get_keyboard_for_role(user.role) if user else None
-    
+
     await message.answer(
         "Можно взять следующую работу или открыть статистику.",
         reply_markup=build_post_review_keyboard() if reply_markup is None else None,
     )
+    if reply_markup:
+        await message.answer("Меню эксперта обновлено.", reply_markup=reply_markup)
 
 
 @router.message(Command("expert_stats"))

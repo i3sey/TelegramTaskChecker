@@ -10,18 +10,16 @@ from aiogram.types import (
 from src.db.engine import session_scope
 from src.db.models import CampaignType, User, UserRole
 from src.bot.services.campaign_service import get_active_campaigns
-from src.bot.services.review_service import count_reviewer_reviews_for_campaign
 from src.bot.services.submission_service import get_user_submissions
+from src.bot.services.user_service import get_campaign_accesses
 
 BTN_HELP = "❓ Помощь"
 BTN_PROFILE = "👤 Профиль"
-BTN_ROLE = "🎭 Роль"
 
 BTN_SUBMIT = "📤 Загрузить работу"
 BTN_MY_SUBMISSIONS = "📎 Мои работы"
 BTN_CAMPAIGNS = "📋 Кампании"
 BTN_P2P_REVIEW = "👥 Проверить работы"
-BTN_VOTE = "🗳 Голосование"
 
 BTN_QUEUE = "📥 Очередь"
 BTN_TAKE = "🟢 Взять работу"
@@ -56,13 +54,13 @@ def _mk_markup(rows: list[list[str]]) -> ReplyKeyboardMarkup:
 
 
 def build_campaign_title_keyboard() -> ReplyKeyboardMarkup:
-    return _mk_markup([[BTN_PROFILE, BTN_ROLE, BTN_HELP]])
+    return _mk_markup([[BTN_PROFILE, BTN_HELP]])
 
 def build_campaign_min_score_keyboard() -> ReplyKeyboardMarkup:
     return _mk_markup(
         [
             [BTN_SCORE_0, BTN_SCORE_10, BTN_SCORE_40],
-            [BTN_PROFILE, BTN_ROLE, BTN_HELP],
+            [BTN_PROFILE, BTN_HELP],
         ]
     )
 
@@ -70,7 +68,7 @@ def build_campaign_max_score_keyboard() -> ReplyKeyboardMarkup:
     return _mk_markup(
         [
             [BTN_SCORE_5, BTN_SCORE_60, BTN_SCORE_100],
-            [BTN_PROFILE, BTN_ROLE, BTN_HELP],
+            [BTN_PROFILE, BTN_HELP],
         ]
     )
 
@@ -78,12 +76,12 @@ def build_campaign_ttl_keyboard() -> ReplyKeyboardMarkup:
     return _mk_markup(
         [
             [BTN_MINUTES_15, BTN_MINUTES_40, BTN_HOUR_1],
-            [BTN_PROFILE, BTN_ROLE, BTN_HELP],
+            [BTN_PROFILE, BTN_HELP],
         ]
     )
 
 def build_campaign_anonymous_keyboard() -> ReplyKeyboardMarkup:
-    return _mk_markup([[BTN_ANON_YES, BTN_ANON_NO], [BTN_PROFILE, BTN_ROLE, BTN_HELP]])
+    return _mk_markup([[BTN_ANON_YES, BTN_ANON_NO], [BTN_PROFILE, BTN_HELP]])
 
 def build_organizer_more_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -241,28 +239,11 @@ def build_transcribed_comment_keyboard() -> InlineKeyboardMarkup:
         ]
     )
 
-def build_ban_comment_keyboard() -> InlineKeyboardMarkup:
-    """Build keyboard for entering ban reason comment."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Отправить", callback_data="ban_comment_submit")],
-            [InlineKeyboardButton(text="↩️ Отмена", callback_data="ban_comment_cancel")],
-        ]
-    )
-
 def build_comment_skip_keyboard() -> InlineKeyboardMarkup:
     """Build keyboard for skipping comment after score selection."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="⏭️ Пропустить комментарий", callback_data="comment_skip")],
-        ]
-    )
-
-def build_skip_criteria_keyboard() -> InlineKeyboardMarkup:
-    """Build keyboard for skipping the whole criteria scoring stage."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="⏭️ Пропустить критерии", callback_data="skip_criteria_scores")],
         ]
     )
 
@@ -286,7 +267,7 @@ def _get_student_keyboard(show_p2p_review: bool = False) -> ReplyKeyboardMarkup:
     if show_p2p_review:
         rows.append([BTN_P2P_REVIEW])
 
-    rows.append([BTN_PROFILE, BTN_ROLE, BTN_HELP])
+    rows.append([BTN_PROFILE, BTN_HELP])
     return _mk_markup(rows)
 
 async def student_has_pending_p2p_reviews(user: User) -> bool:
@@ -297,22 +278,36 @@ async def student_has_pending_p2p_reviews(user: User) -> bool:
     async with session_scope() as session:
         campaigns = await get_active_campaigns(session)
         submissions = await get_user_submissions(user.tg_id, session)
+        accesses = await get_campaign_accesses(user.tg_id, session)
 
-        submitted_campaign_ids = {submission.campaign_id for submission in submissions}
+        latest_submission_by_campaign = {}
+        for submission in submissions:
+            latest_submission_by_campaign.setdefault(submission.campaign_id, submission)
+
+        submitted_campaign_ids = set(latest_submission_by_campaign)
+        incomplete_campaign_ids = {
+            campaign_id
+            for campaign_id, submission in latest_submission_by_campaign.items()
+            if submission.p2p_completed_at is None
+        }
+        accessible_campaign_ids = {
+            access.campaign_id
+            for access in accesses
+            if access.invite_role == "student"
+        }
         p2p_campaigns = [
             campaign
             for campaign in campaigns
-            if campaign.type == CampaignType.P2P and campaign.id in submitted_campaign_ids
+            if (
+                campaign.type == CampaignType.P2P
+                and campaign.id in submitted_campaign_ids
+                and campaign.id in incomplete_campaign_ids
+                and campaign.id in accessible_campaign_ids
+            )
         ]
 
         for campaign in p2p_campaigns:
-            done = await count_reviewer_reviews_for_campaign(
-                user.tg_id,
-                campaign.id,
-                session,
-            )
-            if done < campaign.p2p_reviews_required:
-                return True
+            return True
 
     return False
 
@@ -333,7 +328,7 @@ def get_keyboard_for_role(role: UserRole):
         return _mk_markup(
             [
                 [BTN_TAKE, BTN_QUEUE, BTN_EXPERT_STATS],
-                [BTN_PROFILE, BTN_ROLE, BTN_HELP],
+                [BTN_PROFILE, BTN_HELP],
             ]
         )
     if role == UserRole.EXPERT_ORGANIZER:
@@ -341,15 +336,15 @@ def get_keyboard_for_role(role: UserRole):
             [
                 [BTN_TAKE, BTN_QUEUE, BTN_EXPERT_STATS],
                 [BTN_CREATE_CAMPAIGN, BTN_MY_CAMPAIGNS],
-                [BTN_PROFILE, BTN_ROLE, BTN_HELP],
+                [BTN_PROFILE, BTN_HELP],
             ]
         )
     if role == UserRole.ORGANIZER:
         return _mk_markup(
             [
                 [BTN_CREATE_CAMPAIGN, BTN_MY_CAMPAIGNS],
-                [BTN_PROFILE, BTN_ROLE, BTN_HELP],
+                [BTN_PROFILE, BTN_HELP],
             ]
         )
 
-    return _mk_markup([[BTN_ROLE, BTN_PROFILE, BTN_HELP]])
+    return _mk_markup([[BTN_PROFILE, BTN_HELP]])

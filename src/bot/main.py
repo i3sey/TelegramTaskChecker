@@ -14,7 +14,6 @@ from src.bot.handlers.admin_router import router as admin_router
 from src.bot.handlers.auth_router import router as auth_router
 from src.bot.handlers.campaign_router import router as campaign_router
 from src.bot.handlers.expert_router import router as expert_router
-from src.bot.handlers.student_router import router as student_router
 from src.bot.handlers.organizer_router import router as organizer_router
 from src.bot.handlers.peer_router import router as peer_router
 from src.bot.middleware.ban_check import BanCheckMiddleware
@@ -82,7 +81,6 @@ async def main() -> None:
 
     dp.include_router(admin_router)
     dp.include_router(auth_router)
-    dp.include_router(student_router)
     dp.include_router(campaign_router)
     dp.include_router(expert_router)
     dp.include_router(organizer_router)

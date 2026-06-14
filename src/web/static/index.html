@@ -955,15 +955,9 @@
                   </div>
                 </div>
 
-                <div class="field-grid-2">
-                  <div>
-                    <label class="label" for="campaign-p2p-input">Требуемо peer-review</label>
-                    <input class="input" id="campaign-p2p-input" type="number" value="3" />
-                  </div>
-                  <div>
-                    <label class="label" for="campaign-voting-type-input">Тип агрегации оценок</label>
-                    <input class="input" id="campaign-voting-type-input" placeholder="Например: average" />
-                  </div>
+                <div>
+                  <label class="label" for="campaign-p2p-input">Требуемо peer-review</label>
+                  <input class="input" id="campaign-p2p-input" type="number" value="3" />
                 </div>
 
                 <div>
@@ -1093,8 +1087,8 @@
     ];
 
     const CAMPAIGN_TYPE_OPTIONS = [
-      { value: "expert_review", label: "expert_review — экспертная проверка" },
-      { value: "peer_review", label: "peer_review — peer review" },
+      { value: "expert", label: "expert — экспертная проверка" },
+      { value: "p2p", label: "p2p — peer review" },
     ];
 
     const SUBMISSION_FORMAT_OPTIONS = [
@@ -1165,7 +1159,6 @@
       campaignMaxScore: document.getElementById("campaign-max-score-input"),
       campaignTtl: document.getElementById("campaign-ttl-input"),
       campaignP2p: document.getElementById("campaign-p2p-input"),
-      campaignVotingType: document.getElementById("campaign-voting-type-input"),
       campaignDeadline: document.getElementById("campaign-deadline-input"),
       campaignExtensions: document.getElementById("campaign-extensions-input"),
       campaignCriteria: document.getElementById("campaign-criteria-input"),
@@ -1364,6 +1357,11 @@
                 <div class="mini-label">Проверено</div>
                 <div class="mini-value">${escapeHtml(item.reviewed_count)}</div>
               </div>
+              ${item.type === "p2p" ? `
+              <div class="mini-metric">
+                <div class="mini-label">Ждут P2P</div>
+                <div class="mini-value">${escapeHtml(item.p2p_pending_count)}</div>
+              </div>` : ""}
             </div>
 
             <div class="progress-row">
@@ -1393,10 +1391,12 @@
             <div class="campaign-head">
               <div>${badge(campaign.is_active ? "active" : "inactive", campaign.is_active ? "green" : "slate")}</div>
               <div class="actions">
-                <button class="button secondary js-edit-campaign" data-id="${campaign.id}">Редактировать</button>
-                <button class="button ${campaign.is_active ? "danger" : "success"} js-toggle-campaign" data-id="${campaign.id}" data-next="${campaign.is_active ? "false" : "true"}">
-                  ${campaign.is_active ? "Деактивировать" : "Активировать"}
-                </button>
+                ${campaign.type === "voting" ? "" : `<button class="button secondary js-edit-campaign" data-id="${campaign.id}">Редактировать</button>`}
+                ${campaign.type === "voting" && !campaign.is_active ? "" : `
+                  <button class="button ${campaign.is_active ? "danger" : "success"} js-toggle-campaign" data-id="${campaign.id}" data-next="${campaign.is_active ? "false" : "true"}">
+                    ${campaign.is_active ? "Деактивировать" : "Активировать"}
+                  </button>
+                `}
               </div>
             </div>
 
@@ -1408,7 +1408,7 @@
 
             <div class="helper">
               Диапазон баллов: ${escapeHtml(campaign.min_score)}–${escapeHtml(campaign.max_score)} · TTL: ${escapeHtml(campaign.ttl_minutes)} мин. ·
-              peer-review: ${escapeHtml(campaign.p2p_reviews_required)} · voting: ${escapeHtml(campaign.voting_type || "—")}
+              peer-review: ${escapeHtml(campaign.p2p_reviews_required)}
             </div>
 
             <div class="mini-metrics">
@@ -1424,6 +1424,11 @@
                 <div class="mini-label">Проверено</div>
                 <div class="mini-value">${escapeHtml(campaign.reviewed_count)}</div>
               </div>
+              ${campaign.type === "p2p" ? `
+              <div class="mini-metric">
+                <div class="mini-label">Не завершили P2P</div>
+                <div class="mini-value">${escapeHtml(campaign.p2p_pending_count)}</div>
+              </div>` : ""}
               <div class="mini-metric">
                 <div class="mini-label">Средний балл</div>
                 <div class="mini-value">${escapeHtml(campaign.average_score ?? "—")}</div>
@@ -1635,7 +1640,6 @@
       els.campaignMaxScore.value = campaign.max_score ?? 100;
       els.campaignTtl.value = campaign.ttl_minutes ?? 1440;
       els.campaignP2p.value = campaign.p2p_reviews_required ?? 3;
-      els.campaignVotingType.value = campaign.voting_type || "";
       els.campaignDeadline.value = campaign.campaign_deadline_at ? toDatetimeLocalValue(campaign.campaign_deadline_at) : "";
       els.campaignExtensions.value = campaign.allowed_extensions || "";
       els.campaignCriteria.value = campaign.criteria_text || "";
@@ -1663,7 +1667,6 @@
         max_score: Number(els.campaignMaxScore.value || 0),
         ttl_minutes: Number(els.campaignTtl.value || 1440),
         p2p_reviews_required: Number(els.campaignP2p.value || 3),
-        voting_type: els.campaignVotingType.value.trim() || null,
         campaign_deadline_at: els.campaignDeadline.value ? new Date(els.campaignDeadline.value).toISOString() : null,
         allowed_extensions: els.campaignExtensions.value.trim() || null,
         criteria_text: els.campaignCriteria.value.trim() || null,

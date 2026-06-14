@@ -7,7 +7,7 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from src.bot.states import RegistrationStates, RoleChangeStates
+from src.bot.states import RegistrationStates
 from src.db.models import UserRole
 from src.db.engine import session_scope
 from src.bot.services.user_service import (
@@ -16,7 +16,6 @@ from src.bot.services.user_service import (
     get_campaign_accesses,
     get_user,
     grant_campaign_access,
-    update_user_role,
 )
 from src.bot.services.invite_service import (
     get_invite_by_code,
@@ -30,7 +29,6 @@ from src.bot.keyboards import (
     build_study_group_confirmation_keyboard,
     BTN_PROFILE,
     BTN_HELP,
-    BTN_ROLE,
 )
 from src.bot.ui import (
     role_label,
@@ -174,7 +172,6 @@ async def cmd_start(message: types.Message, state: FSMContext):
             commands_text = (
                 "Доступные команды:\n"
                 "👤 /profile - Профиль\n"
-                "🎭 /role - Изменить роль\n"
                 "❓ /help - Помощь"
             )
             if existing_user.role != UserRole.STUDENT:
@@ -182,7 +179,6 @@ async def cmd_start(message: types.Message, state: FSMContext):
                     "Доступные команды:\n"
                     "📋 /campaigns - Активные кампании\n"
                     "👤 /profile - Профиль\n"
-                    "🎭 /role - Изменить роль\n"
                     "❓ /help - Помощь"
                 )
 
@@ -228,6 +224,9 @@ async def cmd_start(message: types.Message, state: FSMContext):
 @router.message(StateFilter(RegistrationStates.waiting_for_full_name))
 async def process_full_name(message: types.Message, state: FSMContext):
     """Process user's full name input."""
+    if not message.text:
+        await message.answer("⚠️ Пожалуйста, введите ваше полное имя текстовым сообщением.")
+        return
     full_name = message.text.strip()
 
     # Validate input
@@ -384,6 +383,9 @@ async def reg_confirm_full_name(callback: types.CallbackQuery, state: FSMContext
 @router.message(StateFilter(RegistrationStates.waiting_for_study_group))
 async def process_study_group(message: types.Message, state: FSMContext):
     """Process user's study group input."""
+    if not message.text:
+        await message.answer("⚠️ Пожалуйста, введите название учебной группы текстовым сообщением.")
+        return
     study_group = message.text.strip().upper()
 
     # Validate input
@@ -592,84 +594,6 @@ async def cmd_profile(message: types.Message):
 async def btn_profile(message: types.Message):
     await cmd_profile(message)
 
-@router.message(Command("role"))
-async def cmd_role(message: types.Message, state: FSMContext):
-    """Handle /role command to change user role."""
-    tg_id = message.from_user.id
-
-    async with session_scope() as session:
-        user = await get_user(tg_id=tg_id, session=session)
-
-        if not user:
-            await message.answer(
-                "❌ Вы не зарегистрированы. Используйте /start для регистрации."
-            )
-            return
-
-    await message.answer(
-        "🎭 Выберите новую роль:",
-        reply_markup=_build_role_keyboard(),
-        parse_mode="HTML",
-    )
-    await state.set_state(RoleChangeStates.waiting_for_role)
-
-@router.message(F.text == BTN_ROLE)
-async def btn_role(message: types.Message, state: FSMContext):
-    await cmd_role(message, state)
-
-@router.callback_query(StateFilter(RoleChangeStates.waiting_for_role))
-async def process_role_change(callback: types.CallbackQuery, state: FSMContext):
-    """Process role change for existing users."""
-    if not callback.data or not callback.data.startswith("role_"):
-        await callback.answer()
-        return
-
-    role_value = callback.data.replace("role_", "")
-    try:
-        role = UserRole(role_value)
-    except ValueError:
-        await callback.answer("❌ Неизвестная роль", show_alert=True)
-        return
-
-    tg_id = callback.from_user.id
-
-    async with session_scope() as session:
-        user = await get_user(tg_id=tg_id, session=session)
-
-        if not user:
-            await callback.answer("❌ Пользователь не найден", show_alert=True)
-            return
-
-        user = await update_user_role(tg_id=tg_id, role=role, session=session)
-        has_access = await _has_invite_access(user, session)
-        organizer_note = ""
-        if role in {UserRole.ORGANIZER, UserRole.EXPERT_ORGANIZER}:
-            web_access_token = await ensure_web_access_token(user, session)
-            organizer_note = _build_organizer_web_message(web_access_token)
-
-    await state.clear()
-
-    message_text = (
-        "✅ Роль обновлена.\n\n"
-        f"Теперь вы: <b>{_role_label(role)}</b>"
-    )
-    if _role_requires_invite(role) and not has_access:
-        message_text += (
-            "\n\nДоступ к функциям роли будет открыт после инвайта. "
-            "Откройте ссылку приглашения"
-        )
-    message_text += organizer_note
-
-    await callback.message.edit_text(
-        message_text,
-        parse_mode="HTML",
-    )
-    await callback.message.answer(
-        "Главное меню обновлено.",
-        reply_markup=await get_keyboard_for_user(user),
-    )
-    await callback.answer()
-
 @router.message(Command("cancel"))
 async def cmd_cancel(message: types.Message, state: FSMContext):
     """Handle /cancel command to cancel registration."""
@@ -720,5 +644,20 @@ async def menu_help(callback: types.CallbackQuery, state: FSMContext) -> None:
         await callback.answer("❌ Ошибка: не удалось получить сообщение", show_alert=True)
         return
 
-    await cmd_help(callback.message, state)
+    current_state = await state.get_state()
+    if current_state is not None:
+        await callback.message.answer("❌ Используйте /cancel для отмены текущей операции.")
+        await callback.answer()
+        return
+
+    user_role = None
+    async with session_scope() as session:
+        user = await get_user(tg_id=callback.from_user.id, session=session)
+        if user:
+            user_role = user.role
+
+    await callback.message.answer(
+        help_text_for_role(user_role),
+        parse_mode="HTML",
+    )
     await callback.answer()

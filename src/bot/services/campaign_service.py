@@ -224,7 +224,6 @@ class CampaignService:
         campaign_deadline_at: datetime,
         is_expert_anon: bool,
         p2p_reviews_required: int,
-        voting_type: str | None,
         organizer_id: int,
         session: AsyncSession,
         submission_format: SubmissionFormat = SubmissionFormat.DOCUMENT,
@@ -249,6 +248,9 @@ class CampaignService:
         Returns:
             Created Campaign object
         """
+        if campaign_type == CampaignType.P2P and not 1 <= p2p_reviews_required <= 100:
+            raise ValueError("p2p_reviews_required must be between 1 and 100")
+
         campaign = Campaign(
             organizer_id=organizer_id,
             title=title,
@@ -259,7 +261,6 @@ class CampaignService:
             campaign_deadline_at=campaign_deadline_at,
             is_expert_anon=is_expert_anon,
             p2p_reviews_required=p2p_reviews_required,
-            voting_type=voting_type,
             submission_format=submission_format,
             allowed_extensions=allowed_extensions,
             criteria_text=criteria_text,
@@ -577,7 +578,6 @@ async def create_campaign(
     campaign_deadline_at: datetime,
     is_expert_anon: bool,
     p2p_reviews_required: int,
-    voting_type: str | None,
     organizer_id: int,
     session: AsyncSession,
     submission_format: SubmissionFormat = SubmissionFormat.DOCUMENT,
@@ -596,7 +596,6 @@ async def create_campaign(
         campaign_deadline_at,
         is_expert_anon,
         p2p_reviews_required,
-        voting_type,
         organizer_id,
         session,
         submission_format,
